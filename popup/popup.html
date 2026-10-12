@@ -15,6 +15,7 @@
     <button data-tab="page" class="active">This page</button>
     <button data-tab="paste">Paste a posting</button>
     <button data-tab="triage">Triage</button>
+    <button data-tab="queue">Queue</button>
   </nav>
 
   <div id="status" class="status">Scanning the page.</div>
@@ -118,6 +119,17 @@
     </div>
 
     <div id="tri-out"></div>
+  </div>
+
+  <!-- ------------------------------------------------------ queue tab -->
+  <div class="panel" id="panel-queue" hidden>
+    <div class="row">
+      <button id="q-open-next" class="primary">Open next</button>
+      <button id="q-refresh">Refresh</button>
+    </div>
+    <p class="note" id="q-status"></p>
+    <p class="note">Opening a link is not applying. Nothing is ever marked submitted for you.</p>
+    <div id="q-out"></div>
   </div>
 
   <footer>

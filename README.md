@@ -32,7 +32,9 @@ extension's own bundled `data/profile.json`.
 
 ```
 manifest.json
-background.js              seeds data/profile.json into storage on install
+background.js              install seed, harvest pipeline tail, badge, notifications
+cli.mjs                    the paste-tab report on the command line
+icons/                     generated PNGs, needed by chrome.notifications
 data/profile.json          your canonical application data
 rules/                     EDITABLE. no engine logic lives here.
   field-rules.js           label pattern -> profile path or resolver
@@ -361,6 +363,44 @@ eligibility, and stores the record keyed by listing URL. `engine/harvest.js` is
 pure, so the whole parser is tested against synthetic panel text.
 
 Same caveat as stage 1: **none of this has met a live Jobright page.**
+
+## Work queue and notifications
+
+The **Queue** tab lists shortlisted roles with company, title, destination URL,
+verdict and referral leads. **Open next** opens one destination in a foreground
+tab and marks it **opened**.
+
+Statuses are queued, opened, submitted, skipped. **Nothing becomes submitted
+automatically.** `advanceOnOpen()` returns `opened` and nothing else, and the
+suite checks every input to it, because opening a link is not applying.
+
+When you mark something submitted, in this order: a record is written to the
+tracker overlay (company, role, location, term, destination as the portal URL,
+ATS inferred from the host, status Applied, today's date, referral leads and
+match score in the notes, **account email left blank** because nothing here
+knows which one you used), and only then is **Mark applied on Jobright** offered
+as a separate action.
+
+That action brings the card into view on the board and stops. It does not answer
+Jobright's "Did you apply?" prompt, and nothing in this codebase can: the
+prompt's wording is in `FORBIDDEN_CLICK`, and the only click the worker's focus
+handler can reach is `focusCard`. **This is narrower than "mark it applied for
+me" and deliberately so** — a false applied-record is worse than none. Say the
+word if you want it to actually click.
+
+Notifications, all owned by the service worker because a content script cannot
+reach `chrome.notifications` or `chrome.action`:
+
+- the toolbar badge shows live harvest progress, `12/40`, green normally and
+  amber once any card has failed. A badge fits about four characters so `12/40`
+  can clip; the full progress is always in the tooltip.
+- on completion: **Jobright triage done** / "40 reviewed. 12 worth applying to,
+  25 skipped, 3 failed to harvest." Counts come from what was actually stored,
+  not from the loop's own tally.
+- on early termination, whether you stopped it, navigated away or hit a cap:
+  **Jobright triage stopped** with how far it got and that progress was saved.
+- clicking either notification focuses the Jobright tab.
+- the badge clears when you next open the popup.
 
 ## Eligibility
 

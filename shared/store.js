@@ -110,3 +110,20 @@ export const clearTriage = () => chrome.storage.local.set({ [K.TRIAGE]: { ...EMP
 export const getHarvestControl = () => get("harvest_control", { stop: false });
 export const setHarvestStop = (stop) => chrome.storage.local.set({ harvest_control: { stop: Boolean(stop), at: new Date().toISOString() } });
 export const getHarvestProgress = () => get("harvest_progress", null);
+
+// ------------------------------------------------------------ tracker overlay
+//
+// tracker/data.json stays the source of truth. The extension only ever adds to
+// an overlay, which tracker/index.html merges on top, additively, and which you
+// fold into the file when you choose.
+
+export const getTrackerOverlay = () => get("tracker_overlay", { applications: [], deadlines: [] });
+
+export async function addTrackerRecord(record) {
+  const overlay = await getTrackerOverlay();
+  const i = overlay.applications.findIndex((a) => a.id === record.id);
+  if (i === -1) overlay.applications.push(record);
+  else overlay.applications[i] = { ...overlay.applications[i], ...record };
+  await chrome.storage.local.set({ tracker_overlay: overlay });
+  return { overlay, added: i === -1 };
+}

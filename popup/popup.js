@@ -8,8 +8,10 @@ import { $, setStatus } from "./ui.js";
 import { initPageTab, runPage } from "./tab-page.js";
 import { initPasteTab } from "./tab-paste.js";
 import { initTriageTab, runTriage, isJobright } from "./tab-triage.js";
+import { initQueueTab, load as loadQueue } from "./tab-queue.js";
 
 function switchTab(name) {
+  if (name === "queue") loadQueue();
   for (const btn of $("tabs").querySelectorAll("button")) {
     btn.classList.toggle("active", btn.dataset.tab === name);
   }
@@ -24,6 +26,10 @@ function switchTab(name) {
     btn.onclick = () => switchTab(btn.dataset.tab);
   }
 
+  // The badge carries harvest progress. Opening the popup is the point at
+  // which you have seen it, so it clears here. The worker owns it.
+  chrome.runtime.sendMessage({ type: "badge:clear" }).catch(() => {});
+
   let profile = await getProfile();
   if (!profile) {
     const res = await fetch(chrome.runtime.getURL("data/profile.json"));
@@ -34,6 +40,7 @@ function switchTab(name) {
 
   // The paste tab has no dependency on the page, so it is ready either way.
   initPasteTab(profile);
+  initQueueTab();
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 

@@ -123,3 +123,8 @@ ul.reasons li.r-boost { color: var(--green); }
 .h-blocked { color: var(--red); margin: 3px 0; }
 .h-flags { color: var(--amber); margin: 3px 0; }
 .h-clear { color: var(--green); margin: 3px 0; }
+
+/* ----------------------------------------------------------------- queue */
+.q-after:empty { display: none; }
+.q-after { margin-top: 6px; }
+button:disabled { opacity: .45; cursor: default; }

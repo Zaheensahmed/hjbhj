@@ -17,6 +17,7 @@ import { normLabel } from "../engine/normalize.js";
 import { buildReport, reportToText, sectionText, SECTIONS, SECTION_TITLES } from "../engine/report.js";
 import { triageCard, triageAll, VERDICTS } from "../engine/triage.js";
 import { parsePanel, splitSections, bulletsOf, parseInsider, parseMatch, resolveDestination, parseQualificationTags } from "../engine/harvest.js";
+import { QUEUE_STATUSES, AUTO_SETTABLE, advanceOnOpen, nextToOpen, queueSummary, toTrackerRecord, atsFromUrl, slugify, harvestSummaryMessage, earlyTerminationMessage } from "../engine/queue.js";
 import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
 
@@ -335,8 +336,8 @@ group("fill.js cannot submit");
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
   ok("manifest declares no content_scripts, so nothing runs on page load", !("content_scripts" in manifest));
   ok("manifest requests no host permissions", !("host_permissions" in manifest));
-  ok("manifest requests exactly activeTab, scripting, storage",
-    JSON.stringify(manifest.permissions) === JSON.stringify(["activeTab", "scripting", "storage"]),
+  ok("manifest requests exactly activeTab, scripting, storage, notifications",
+    JSON.stringify(manifest.permissions) === JSON.stringify(["activeTab", "scripting", "storage", "notifications"]),
     JSON.stringify(manifest.permissions));
 }
 
@@ -1179,6 +1180,228 @@ group("Feature 4: loop resilience");
   ok("a failed card is still stored, so it is visible", /harvest failed/.test(bg));
   ok("records are keyed by listing URL", /payload\.listingUrl \|\|/.test(bg));
   ok("the message channel stays open for the async reply", /return true;/.test(bg));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Feature 5: nothing is ever submitted for you");
+{
+  ok("there are four queue statuses", JSON.stringify(QUEUE_STATUSES) === '["queued","opened","submitted","skipped"]');
+  ok("submitted is not machine-settable", !AUTO_SETTABLE.includes("submitted") && JSON.stringify(AUTO_SETTABLE) === '["opened"]');
+
+  ok("opening moves queued to opened", advanceOnOpen("queued") === "opened");
+  ok("opening an already-opened item changes nothing", advanceOnOpen("opened") === "opened");
+  ok("opening never touches a submitted item", advanceOnOpen("submitted") === "submitted");
+  ok("opening never touches a skipped item", advanceOnOpen("skipped") === "skipped");
+  for (const st of [...QUEUE_STATUSES, "", null, undefined, "nonsense"]) {
+    if (advanceOnOpen(st) === "submitted" && st !== "submitted") {
+      ok(`advanceOnOpen("${st}") produced submitted`, false);
+    }
+  }
+  ok("no input to advanceOnOpen can produce submitted out of thin air",
+    [...QUEUE_STATUSES, "", "x"].filter((st) => st !== "submitted").every((st) => advanceOnOpen(st) !== "submitted"));
+
+  const entries = [
+    { listingUrl: "u1", company: "B", queueStatus: "opened" },
+    { listingUrl: "u2", company: "A", queueStatus: "queued" },
+    { listingUrl: "u3", company: "C", queueStatus: "submitted" }
+  ];
+  ok("next to open prefers a queued item", nextToOpen(entries).listingUrl === "u2");
+  ok("with nothing queued it falls back to an opened one",
+    nextToOpen(entries.filter((e) => e.queueStatus !== "queued")).listingUrl === "u1");
+  ok("with nothing open it returns null",
+    nextToOpen(entries.filter((e) => e.queueStatus === "submitted")) === null);
+
+  const sum = queueSummary(entries);
+  ok("the summary counts each status", sum.total === 3 && sum.queued === 1 && sum.opened === 1 && sum.submitted === 1);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 5: the tracker record a submission becomes");
+{
+  ok("ATS is inferred from the destination host",
+    atsFromUrl("https://boards.greenhouse.io/acme/jobs/1") === "Greenhouse" &&
+    atsFromUrl("https://jobs.lever.co/acme/9") === "Lever" &&
+    atsFromUrl("https://acme.wd1.myworkdayjobs.com/x") === "Workday");
+  ok("an unknown host yields no ATS rather than a guess", atsFromUrl("https://acme.example/careers") === "");
+  ok("a Jobright URL is not an ATS", atsFromUrl("https://jobright.ai/jobs/info/x") === "");
+  ok("slugify produces a stable id fragment", slugify("Example Company & Co") === "c-h-robinson-co");
+
+  const entry = {
+    listingUrl: "https://jobright.ai/jobs/info/abc",
+    destinationUrl: "https://boards.greenhouse.io/acme/jobs/1",
+    company: "Acme Defense", title: "Security Engineering Intern",
+    referralLeads: [{ kind: "school", text: "2 from your school. Ask before applying cold." }]
+  };
+  const harvested = {
+    record: {
+      header: { company: "Acme Defense", title: "Security Engineering Intern", location: "Your City, MD", startTerm: { label: "2027 Summer" } },
+      match: { overall: 82 },
+      resolvesOnOpen: false,
+      insider: { leads: [] }
+    },
+    eligibility: { flags: [{ filter: "Minimum GPA stated" }], blockers: [] }
+  };
+
+  const rec = toTrackerRecord(entry, harvested, "2026-10-12");
+  ok("the record carries the company", rec.company === "Acme Defense");
+  ok("the record carries the role", rec.role === "Security Engineering Intern");
+  ok("the record carries the location from the harvest", rec.location === "Your City, MD");
+  ok("the record carries the term", rec.term === "2027 Summer");
+  ok("the portal URL is the destination, not the Jobright link", rec.portal_url === entry.destinationUrl);
+  ok("the ATS is filled in from the destination", rec.ats === "Greenhouse");
+  ok("the status is Applied", rec.status === "Applied");
+  ok("the applied date is the day you marked it", rec.date_applied === "2026-10-12");
+  ok("last checked is set too", rec.date_last_checked === "2026-10-12");
+  ok("the referral lead is kept in the notes", /from your school/.test(rec.notes));
+  ok("the match score is kept in the notes", /82%/.test(rec.notes));
+  ok("an eligibility flag is kept in the notes", /Minimum GPA stated/.test(rec.notes));
+  ok("the id is stable and derived", rec.id === "jr-acme-defense-2027-summer", rec.id);
+  ok("the same entry twice produces the same id",
+    toTrackerRecord(entry, harvested, "2026-11-01").id === rec.id);
+
+  // The one field nothing here can know.
+  ok("the account email is left blank rather than guessed", rec.account_email === "");
+  ok("the deadline is left blank rather than guessed", rec.deadline === "");
+  ok("next action is left blank", rec.next_action === "");
+
+  // It has to be a shape the tracker accepts.
+  const T = globalThis.JAF_TRACKER;
+  const normalized = T.normalize({ applications: [rec] });
+  ok("the record normalizes cleanly into the tracker", normalized.applications.length === 1);
+  ok("the record passes tracker validation on dates",
+    !T.validate(normalized).some((p) => p.kind === "bad-date"), JSON.stringify(T.validate(normalized)));
+  ok("the record merges into the tracker as an overlay",
+    T.mergeOverlay({ applications: [] }, { applications: [rec] }).applications[0]._fromOverlay === true);
+
+  // An unharvested entry still produces something sane.
+  const bare = toTrackerRecord({ listingUrl: "https://jobright.ai/jobs/info/z", company: "Zeta" }, null, "2026-10-12");
+  ok("an unharvested entry still yields a record", bare.company === "Zeta" && bare.status === "Applied");
+  ok("missing facts stay blank", bare.role === "" && bare.location === "" && bare.term === "");
+  ok("with no destination the Jobright URL is used", bare.portal_url === "https://jobright.ai/jobs/info/z");
+
+  const resolves = toTrackerRecord(entry, { record: { ...harvested.record, resolvesOnOpen: true }, eligibility: { flags: [], blockers: [] } }, "2026-10-12");
+  ok("a resolve-on-open destination is noted in the record", /resolved only on open/i.test(resolves.notes));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 5: notification text");
+{
+  const msg = harvestSummaryMessage({ reviewed: 40, worthApplying: 12, skipped: 25, failed: 3 });
+  ok("the completion body matches the stated format",
+    msg === "40 reviewed. 12 worth applying to, 25 skipped, 3 failed to harvest.", msg);
+
+  const early = earlyTerminationMessage({ reason: "stopped by you", done: 12, total: 40, failed: 1 });
+  ok("early termination says how far it got", /12 of 40/.test(early));
+  ok("early termination names the reason", /stopped by you/.test(early));
+  ok("early termination says progress was saved", /saved/i.test(early), early);
+  ok("early termination reports failures when there were some", /1 failed/.test(early));
+  ok("early termination omits failures when there were none",
+    !/failed/.test(earlyTerminationMessage({ reason: "navigation", done: 3, total: 9, failed: 0 })));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 5: the worker owns the badge and notifications");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const bg = stripComments(fs.readFileSync(path.join(root, "background.js"), "utf8"));
+
+  ok("the worker sets the badge", /chrome\.action\.setBadgeText/.test(bg));
+  ok("the badge shows done over total", /\$\{payload\.done\}\/\$\{payload\.total\}/.test(bg));
+  ok("the badge turns amber when a card failed", /#d97706/.test(bg) && /failed > 0/.test(bg));
+  ok("the badge is green otherwise", /#16a34a/.test(bg));
+  ok("the full progress is also in the tooltip, since a badge clips", /setBadgeTitle/.test(bg) && /setTitle/.test(bg));
+  ok("the worker fires the completion notification", /chrome\.notifications\.create/.test(bg) && /Jobright triage done/.test(bg));
+  ok("the worker notifies on early termination too", /Jobright triage stopped/.test(bg) && /earlyTerminationMessage/.test(bg));
+  ok("clicking the notification focuses the Jobright tab",
+    /notifications\.onClicked/.test(bg) && /chrome\.tabs\.update\(harvestTabId, \{ active: true \}\)/.test(bg));
+  ok("the worker records which tab the harvest ran in", /sender\.tab\.id/.test(bg));
+  ok("the worker clears the badge on request", /"badge:clear"/.test(bg));
+  ok("completion counts come from what was actually stored", /harvestCounts/.test(bg) && /getTriage/.test(bg));
+  ok("the notification has a real icon file", /icons\/icon-128\.png/.test(bg));
+
+  // The content script must not try to do any of this itself.
+  const harvestSrc = stripComments(fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8"));
+  ok("the content script never calls chrome.notifications", !/chrome\.notifications/.test(harvestSrc));
+  ok("the content script never sets the badge", !/chrome\.action/.test(harvestSrc));
+  ok("the content script messages the worker instead", /chrome\.runtime\.sendMessage/.test(harvestSrc));
+
+  const popup = stripComments(fs.readFileSync(path.join(root, "popup/popup.js"), "utf8"));
+  ok("opening the popup clears the badge", /badge:clear/.test(popup));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 5: the queue never claims you applied");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const q = stripComments(fs.readFileSync(path.join(root, "popup/tab-queue.js"), "utf8"));
+
+  ok("opening uses advanceOnOpen, which cannot yield submitted", /advanceOnOpen\(/.test(q));
+  ok("the queue never assigns submitted itself",
+    !/setQueueStatus\([^)]*["'`]submitted["'`]/.test(q), "found a hard-coded submitted transition");
+  ok("submitted only ever comes from the status control you change",
+    /const status = sel\.value/.test(q) && /status === "submitted"/.test(q));
+  ok("open-next opens in a foreground tab", /chrome\.tabs\.create\(\{ url: [^}]*active: true/.test(q));
+  ok("the queue says opening is not applying", /not applying/i.test(q));
+
+  // Order: tracker first, then the Jobright step is offered.
+  const trackerAt = q.indexOf("addTrackerRecord");
+  const jobrightAt = q.indexOf("data-jobright");
+  ok("the tracker write happens before the Jobright action is offered",
+    trackerAt > -1 && jobrightAt > -1 && trackerAt < jobrightAt);
+
+  ok("the queue never clicks anything on a page", !/\.click\s*\(/.test(q));
+  ok("the queue never answers the did-you-apply prompt",
+    !/did\s*you\s*apply/i.test(q.replace(/"Did you apply\?"/g, "")) || /does not answer/i.test(q));
+  ok("the Jobright action only brings the card into view",
+    /queue:focusCard/.test(q) && !/markApplied|setApplied/.test(q));
+
+  const bg = stripComments(fs.readFileSync(path.join(root, "background.js"), "utf8"));
+  const focusHandler = bg.slice(bg.indexOf('"queue:focusCard"'), bg.indexOf('"queue:focusCard"') + 1200);
+  ok("the worker's focus handler calls only focusCard", /api\.focusCard\(cardId\)/.test(focusHandler));
+  ok("the worker's focus handler clicks nothing", !/\.click\s*\(/.test(focusHandler));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 5: packaging");
+{
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+  ok("icons are declared", manifest.icons && manifest.icons["128"] === "icons/icon-128.png");
+  ok("the action has an icon", manifest.action.default_icon && manifest.action.default_icon["16"]);
+  for (const size of [16, 48, 128]) {
+    const file = path.join(root, `icons/icon-${size}.png`);
+    ok(`icons/icon-${size}.png exists`, fs.existsSync(file));
+    const head = fs.readFileSync(file).subarray(0, 8);
+    ok(`icons/icon-${size}.png is a real PNG`, head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
+  }
+  ok("still no host permissions", !("host_permissions" in manifest));
+  ok("still no content_scripts", !("content_scripts" in manifest));
+
+  // Nothing anywhere reaches the network except the extension's own files.
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+      if (e.name === ".git" || e.name === "node_modules" || e.name === "test") continue;
+      const rel = dir ? `${dir}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(rel);
+      else if (e.name.endsWith(".js") || e.name.endsWith(".mjs")) files.push(rel);
+    }
+  };
+  walk("");
+  const offenders = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(root, f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+    for (const m of src.matchAll(/fetch\s*\(\s*([^)]{0,80})/g)) {
+      const arg = m[1];
+      const local = /chrome\.runtime\.getURL|["'`](?:\.\/)?(?:data|tracker)\/|["'`]data\.json["'`]/.test(arg);
+      if (!local) offenders.push(`${f}: fetch(${arg.slice(0, 50)})`);
+    }
+  }
+  ok("every fetch in the extension targets a bundled file", offenders.length === 0, offenders.join(" | "));
+  ok("nothing opens a socket", !files.some((f) => /WebSocket|EventSource/.test(fs.readFileSync(path.join(root, f), "utf8"))));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
