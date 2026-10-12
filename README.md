@@ -156,6 +156,37 @@ Exit code 0 is viable, 2 means a hard blocker or a refused output, 1 is a usage
 error. The suite asserts the CLI output is byte-identical to what the popup
 renders.
 
+## Application tracker
+
+`tracker/` is a separate tool: one page, no server, no build. `tracker/data.json`
+is the source of truth and is meant to be edited by hand. Dates are
+`YYYY-MM-DD`; anything else is reported as a bad date rather than guessed.
+
+Views: all by status, not checked in 30+ days, upcoming deadlines, and needs
+filling in.
+
+Opening it:
+
+| how | works |
+|-----|-------|
+| `chrome-extension://<id>/tracker/index.html` | yes, and reads the extension's storage overlay |
+| `node test/serve.mjs` then `localhost:8731/tracker/index.html` | yes |
+| straight from the filesystem | the page loads, then asks you to pick `data.json` with a file button, because a `file://` page may not read a file next to it |
+
+The page cannot write to your disk. Edits are in memory, and **Copy as JSON** or
+**Download data.json** hands you the file to replace by hand.
+
+Seeded with 18 applications and the 6 deadlines from `key_deadlines`. Nine
+statuses were inferred from the groupings in your notes rather than stated, so
+they carry a `status_assumed` flag, show an **assumed** tag, and are listed
+together under "Needs filling in". Fields nobody told me, such as portal URLs
+and which account email was used, are blank rather than filled with a plausible
+guess, and the same view lists them.
+
+`tracker/logic.js` holds all the date arithmetic and view logic. It has no
+import and no export, which is what lets it load as a classic script for the
+`file://` case and as a node import for the tests.
+
 ## The assembler
 
 Claims and skills are pools of individually true statements, each tagged. The

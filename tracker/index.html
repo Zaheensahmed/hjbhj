@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application tracker</title>
+<link rel="stylesheet" href="tracker.css">
+</head>
+<body>
+<header>
+  <h1>Application tracker</h1>
+  <nav id="views">
+    <button data-view="status" class="active">All by status</button>
+    <button data-view="stale">Not checked in 30+ days</button>
+    <button data-view="deadlines">Upcoming deadlines</button>
+    <button data-view="problems">Needs filling in</button>
+  </nav>
+  <span id="meta"></span>
+</header>
+
+<div id="load" class="banner amber" hidden>
+  <strong>Could not read data.json.</strong>
+  <p id="load-why"></p>
+  <p>A page opened straight from the filesystem is not allowed to read a file next to it. Three ways round it, cheapest first:</p>
+  <ol>
+    <li><label class="filebtn">Load data.json<input type="file" id="load-file" accept=".json"></label> and pick <code>tracker/data.json</code>. Works right now, read-only until you reload.</li>
+    <li>Open this page from the extension instead: <code id="ext-url">chrome-extension://&lt;id&gt;/tracker/index.html</code></li>
+    <li><code>node test/serve.mjs</code> then <code>http://localhost:8731/tracker/index.html</code></li>
+  </ol>
+</div>
+
+<div id="overlay-note" class="banner blue" hidden></div>
+
+<main id="out"></main>
+
+<footer>
+  <div class="row">
+    <button id="copy-json">Copy the whole file as JSON</button>
+    <button id="download-json">Download data.json</button>
+    <span class="note">This page cannot write to your disk. Edits here are in memory. Copy or download, then replace <code>tracker/data.json</code> by hand.</span>
+  </div>
+</footer>
+
+<script src="logic.js"></script>
+<script src="tracker.js"></script>
+</body>
+</html>

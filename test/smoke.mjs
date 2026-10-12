@@ -539,5 +539,222 @@ group("Feature 1: popup wiring");
   ok("the paste panel exists", htmlIds.has("panel-paste") && htmlIds.has("panel-page"));
 }
 
+
+// ---------------------------------------------------------------------------
+group("Feature 2: tracker logic");
+{
+  await import("../tracker/logic.js");
+  const T = globalThis.JAF_TRACKER;
+  const TODAY = new Date(Date.UTC(2026, 9, 12)); // 2026-10-12
+
+  ok("logic.js loads as an ES module and exposes one global", Boolean(T) && typeof T.normalize === "function");
+
+  // dates
+  ok("a valid date parses", T.parseDate("2026-09-03") instanceof Date);
+  ok("a non-date is refused", T.parseDate("Sept 3") === null);
+  ok("a slash date is refused rather than guessed", T.parseDate("09/03/2026") === null);
+  ok("an impossible date is refused", T.parseDate("2026-02-30") === null);
+  ok("an empty date is refused", T.parseDate("") === null && T.parseDate(undefined) === null);
+  ok("daysSince counts whole days", T.daysSince("2026-09-03", TODAY) === 39, String(T.daysSince("2026-09-03", TODAY)));
+  ok("daysSince on an unparseable date is null, not zero", T.daysSince("soon", TODAY) === null);
+
+  // normalize
+  const n = T.normalize({ applications: [{ company: "X" }], deadlines: [{ item: "Y", due: "2027-01-01" }] });
+  ok("normalize fills every field as a string", T.FIELDS.every((f) => typeof n.applications[0][f] === "string"));
+  ok("normalize defaults a missing status to To apply", n.applications[0].status === "To apply");
+  ok("normalize supplies the default status list", n.statuses.includes("Under Review"));
+  ok("normalize tolerates junk input", T.normalize(null).applications.length === 0 && T.normalize(7).deadlines.length === 0);
+
+  // validate
+  const bad = T.normalize({
+    statuses: ["Applied", "Rejected"],
+    applications: [
+      { id: "a", company: "" },
+      { id: "a", company: "Dup" },
+      { id: "b", company: "B", date_applied: "09/03/2026" },
+      { id: "c", company: "C", status: "Vibes" },
+      { id: "d", company: "D", status: "Applied" }
+    ],
+    deadlines: [{ id: "x", item: "No date" }]
+  });
+  const problems = T.validate(bad);
+  const kinds = new Set(problems.map((p) => p.kind));
+  ok("validate catches a missing company", problems.some((p) => p.id === "a" && p.kind === "missing"));
+  ok("validate catches a duplicate id", kinds.has("duplicate-id"));
+  ok("validate catches a non-ISO date", problems.some((p) => p.id === "b" && p.kind === "bad-date"));
+  ok("validate catches an unknown status", problems.some((p) => p.id === "c" && p.kind === "unknown-status"));
+  ok("validate catches applied-with-no-date", problems.some((p) => p.id === "d" && p.kind === "incomplete"));
+  ok("validate catches a deadline with no date at all", problems.some((p) => p.id === "x" && p.kind === "missing"));
+
+  // byStatus
+  const grouped = T.byStatus(T.normalize({
+    applications: [
+      { id: "1", company: "Zeta", status: "Applied" },
+      { id: "2", company: "Alpha", status: "Applied" },
+      { id: "3", company: "Early", status: "Applied", priority: "low" },
+      { id: "4", company: "Q", status: "Rejected" }
+    ]
+  }));
+  ok("byStatus groups by status", grouped.length === 2);
+  ok("byStatus sorts alphabetically inside a group", grouped[0].items[0].company === "Alpha");
+  ok("byStatus pushes low priority to the end", grouped[0].items[2].company === "Early");
+
+  // stale
+  const staleData = T.normalize({
+    applications: [
+      { id: "old", company: "Old", status: "Applied", date_last_checked: "2026-08-01" },
+      { id: "fresh", company: "Fresh", status: "Applied", date_last_checked: "2026-10-10" },
+      { id: "never", company: "Never", status: "Applied", date_applied: "2026-07-01" },
+      { id: "nodates", company: "Nodates", status: "Under Review" },
+      { id: "dead", company: "Dead", status: "Rejected", date_applied: "2026-01-01" },
+      { id: "todo", company: "Todo", status: "To apply" }
+    ]
+  });
+  const st = T.stale(staleData, TODAY);
+  const ids = st.map((r) => r.app.id);
+  ok("stale finds a record checked long ago", ids.includes("old"));
+  ok("stale leaves a recently checked record alone", !ids.includes("fresh"));
+  ok("stale falls back to the applied date when never checked", ids.includes("never") && st.find((r) => r.app.id === "never").basis.includes("never checked"));
+  ok("stale reports a record with no dates rather than hiding it", ids.includes("nodates") && st.find((r) => r.app.id === "nodates").days === null);
+  ok("stale ignores closed applications", !ids.includes("dead"));
+  ok("stale ignores ones not applied to yet", !ids.includes("todo"));
+  ok("stale puts unknowns last, since unknown is not zero", ids[ids.length - 1] === "nodates", ids.join(","));
+  ok("a 29 day gap is not stale", T.stale(T.normalize({ applications: [{ id: "x", company: "X", status: "Applied", date_last_checked: "2026-09-13" }] }), TODAY).length === 0);
+  ok("a 30 day gap is stale", T.stale(T.normalize({ applications: [{ id: "x", company: "X", status: "Applied", date_last_checked: "2026-09-12" }] }), TODAY).length === 1);
+
+  // upcoming
+  const dueData = T.normalize({
+    applications: [
+      { id: "app1", company: "WithDeadline", status: "To apply", deadline: "2026-11-01" },
+      { id: "app2", company: "Closed", status: "Rejected", deadline: "2026-10-20" }
+    ],
+    deadlines: [
+      { id: "past", item: "Past thing", due: "2026-10-01" },
+      { id: "soon", item: "Soon thing", due: "2026-10-15" },
+      { id: "vague", item: "Vague thing", due_text: "sometime" }
+    ]
+  });
+  const due = T.upcoming(dueData, TODAY);
+  ok("upcoming merges deadlines and application deadlines", due.some((r) => r.kind === "application") && due.some((r) => r.kind === "deadline"));
+  ok("upcoming drops deadlines on closed applications", !due.some((r) => r.id === "app2"));
+  ok("upcoming sorts soonest first with overdue at the top", due[0].id === "past" && due[0].overdue === true);
+  ok("upcoming reports days away", due.find((r) => r.id === "soon").daysAway === 3);
+  ok("upcoming puts a date-less item last", due[due.length - 1].id === "vague");
+  ok("upcoming can be windowed", T.upcoming(dueData, TODAY, 5).every((r) => r.daysAway === null || r.daysAway <= 5));
+
+  // mergeOverlay
+  const seed = { applications: [{ id: "a", company: "A", status: "Applied", notes: "seed note" }] };
+  const overlay = { applications: [{ id: "a", status: "Interview" }, { id: "b", company: "B", status: "Applied" }] };
+  const merged = T.mergeOverlay(seed, overlay);
+  ok("the overlay updates a field it supplies", merged.applications.find((a) => a.id === "a").status === "Interview");
+  ok("the overlay does not wipe a field it leaves blank", merged.applications.find((a) => a.id === "a").notes === "seed note");
+  ok("the overlay can add a record", merged.applications.find((a) => a.id === "b")._fromOverlay === true);
+  ok("an overlaid record is marked", merged.applications.find((a) => a.id === "a")._overlaid === true);
+  ok("merging with no overlay is just the seed", T.mergeOverlay(seed, null).applications.length === 1);
+
+  // toJson
+  const round = JSON.parse(T.toJson(merged));
+  ok("toJson round-trips through JSON.parse", Array.isArray(round.applications));
+  ok("toJson strips internal markers", !JSON.stringify(round).includes("_fromOverlay") && !JSON.stringify(round).includes("_overlaid"));
+  ok("toJson omits empty fields rather than writing blanks", !("location" in round.applications[0]));
+  ok("toJson keeps the statuses list", round.statuses.includes("Under Review"));
+  ok("toJson output re-normalizes cleanly", T.normalize(round).applications.length === merged.applications.length);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 2: seed data");
+{
+  const T = globalThis.JAF_TRACKER;
+  const TODAY = new Date(Date.UTC(2026, 9, 12));
+  const raw = JSON.parse(fs.readFileSync(path.join(root, "tracker/data.json"), "utf8"));
+  const data = T.normalize(raw);
+
+  ok("the seed holds 18 applications", data.applications.length === 18, String(data.applications.length));
+  ok("the seed holds 6 deadlines", data.deadlines.length === 6, String(data.deadlines.length));
+
+  const problems = T.validate(data);
+  ok("the seed has no bad dates", !problems.some((p) => p.kind === "bad-date"), JSON.stringify(problems.filter((p) => p.kind === "bad-date")));
+  ok("the seed has no duplicate ids", !problems.some((p) => p.kind === "duplicate-id"));
+  ok("every seed status is in the statuses list", !problems.some((p) => p.kind === "unknown-status"));
+  ok("the seed has no missing companies", !problems.some((p) => p.kind === "missing" && data.applications.some((a) => a.id === p.id)));
+
+  const find = (id) => data.applications.find((a) => a.id === id);
+  ok("Example Company carries the stated applied date", find("booz-allen").date_applied === "2026-09-03");
+  ok("Example Company carries the referral", /referral/i.test(find("booz-allen").notes));
+  ok("Example Company is Under Review as stated", find("booz-allen").status === "Under Review" && !find("booz-allen").status_assumed);
+  ok("Example Company is Under Consideration as stated", find("honeywell").status === "Under Consideration" && !find("honeywell").status_assumed);
+  ok("Example Company carries the rejection date", find("ch-robinson").date_closed === "2026-10-08" && find("ch-robinson").status === "Rejected");
+  ok("Example Lab records the class-year screen", /class-year screen/i.test(find("apl").notes) && find("apl").status === "Rejected");
+  ok("Example Company carries the requisition number", /REQ-00000/.test(find("mitre").notes) && find("mitre").status === "To apply");
+  ok("Example Company carries the role as given", find("lockheed-martin").role === "SWE Cyber Intern");
+  ok("QRT carries the location", find("qrt").location === "New York, NY");
+  ok("Example Company carries the location", find("td-bank").location === "Mount Laurel, NJ");
+  ok("the three low-expectation companies are marked low",
+    ["amazon", "google", "mandiant"].every((id) => find(id).priority === "low"));
+  ok("every to-apply record has a next action",
+    data.applications.filter((a) => a.status === "To apply").every((a) => a.next_action));
+
+  // Statuses the user never stated are flagged rather than presented as fact.
+  const assumed = data.applications.filter((a) => a.status_assumed).map((a) => a.id);
+  ok("inferred statuses are marked as assumed", assumed.length === 9, `${assumed.length}: ${assumed.join(",")}`);
+  ok("nothing was invented into a URL field", data.applications.every((a) => a.portal_url === ""));
+  ok("nothing was invented into an account email field", data.applications.every((a) => a.account_email === ""));
+
+  // Deadlines match the profile's key_deadlines.
+  const dl = (id) => data.deadlines.find((d) => d.id === id);
+  ok("NREIP application deadline", dl("nreip-application").due === "2026-11-30");
+  ok("NREIP references deadline", dl("nreip-references").due === "2026-12-14");
+  ok("NREIP references names Example Supervisor", /Example Supervisor/.test(dl("nreip-references").note));
+  ok("Example Company eCTF deadline", dl("mitre-ectf").due === "2027-01-31");
+  ok("Example Company eCTF notes the dev board date", /November 4/.test(dl("mitre-ectf").note));
+  ok("CIA Stokes is marked approximate with its real wording",
+    dl("cia-stokes").due_approx && /mid-December/.test(dl("cia-stokes").due_text));
+  ok("your campus SFS is marked approximate", dl("your campus-cybercorps-sfs").due_approx);
+  ok("Capital One and Deloitte window is marked approximate", dl("capital-one-deloitte").due_approx);
+  ok("every profile key_deadline has a tracker row",
+    profile.key_deadlines.every((k) => data.deadlines.some((d) => d.item === k.item || d.item.startsWith(k.item.split(" ")[0]))),
+    profile.key_deadlines.map((k) => k.item).join(" | "));
+
+  // Views over the real seed.
+  ok("the status view covers every record",
+    T.byStatus(data).reduce((n, g) => n + g.items.length, 0) === data.applications.length);
+  const st = T.stale(data, TODAY);
+  ok("Example Company is 39 days unchecked in the stale view",
+    st.find((r) => r.app.id === "booz-allen").days === 39,
+    JSON.stringify(st.find((r) => r.app.id === "booz-allen")));
+  ok("to-apply records never show up as stale", !st.some((r) => r.app.status === "To apply"));
+  const due = T.upcoming(data, TODAY);
+  ok("NREIP is the next deadline", due[0].id === "nreip-application", due[0] && due[0].id);
+  ok("nothing in the seed is already overdue", !due.some((r) => r.overdue), JSON.stringify(due.filter((r) => r.overdue).map((r) => r.id)));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 2: tracker stays local");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+
+  const logic = stripComments(fs.readFileSync(path.join(root, "tracker/logic.js"), "utf8"));
+  ok("tracker/logic.js touches no DOM", !/\bdocument\b/.test(logic));
+  ok("tracker/logic.js touches no chrome API", !/\bchrome\./.test(logic));
+  ok("tracker/logic.js makes no network request", !/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(logic));
+  ok("tracker/logic.js has no import or export, so it loads both ways",
+    !/^\s*(import|export)\s/m.test(logic));
+
+  const ui = stripComments(fs.readFileSync(path.join(root, "tracker/tracker.js"), "utf8"));
+  const fetches = [...ui.matchAll(/fetch\s*\(\s*["'`]([^"'`]*)/g)].map((m) => m[1]);
+  ok("the tracker only ever fetches its own data file",
+    fetches.length === 1 && fetches[0] === "data.json",
+    JSON.stringify(fetches));
+  ok("the tracker does not use chrome.scripting", !/chrome\.scripting/.test(ui));
+
+  const html = fs.readFileSync(path.join(root, "tracker/index.html"), "utf8");
+  ok("the tracker page loads no remote script or style",
+    ![...html.matchAll(/(?:src|href)="([^"]+)"/g)].some((m) => /^(https?:)?\/\//.test(m[1])));
+  ok("the tracker page says it cannot write to disk", /cannot write to your disk/i.test(html));
+  ok("the tracker page offers all four views",
+    ["status", "stale", "deadlines", "problems"].every((v) => html.includes(`data-view="${v}"`)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
