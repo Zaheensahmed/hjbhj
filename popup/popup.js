@@ -6,6 +6,7 @@
 import { getProfile, getLearned, getPrefs } from "../shared/store.js";
 import { fetchProfile } from "../shared/load-data.js";
 import { $, setStatus } from "./ui.js";
+import { describeError, errorObj } from "../shared/log.js";
 import { initPageTab, runPage } from "./tab-page.js";
 import { initPasteTab } from "./tab-paste.js";
 import { initTriageTab, runTriage, isJobright } from "./tab-triage.js";
@@ -70,7 +71,9 @@ function switchTab(name) {
     try {
       await runTriage();
     } catch (err) {
-      $("tri-status").textContent = `Triage failed: ${err && err.message ? err.message : err}`;
+      const d = describeError(err);
+      errorObj("[JAF popup] triage threw", d);
+      $("tri-status").textContent = `Triage failed: ${d.text}`;
     }
     return;
   }
@@ -79,6 +82,8 @@ function switchTab(name) {
   try {
     await runPage({});
   } catch (err) {
-    setStatus(`Scan failed: ${err && err.message ? err.message : err}. The paste tab still works.`, "red");
+    const d = describeError(err);
+    errorObj("[JAF popup] page scan threw", d);
+    setStatus(`Scan failed: ${d.text}. The paste tab still works.`, "red");
   }
 })();

@@ -285,8 +285,21 @@
     };
   }
 
+  /** Same rule as shared/log.js: never let a thrown value become "[object Object]". */
+  function errText(err) {
+    if (err instanceof Error) return `${err.name}: ${err.message}`;
+    if (typeof err === "string") return err;
+    try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); }
+  }
+
+  /** Expandable in the page console, and copyable as JSON. */
+  function logObj(label, obj) {
+    console.log(label, obj);
+    try { console.log(`${label} — JSON:\n${JSON.stringify(obj, null, 2)}`); } catch { /* cyclic */ }
+  }
+
   JR.detect = {
-    describeElement, clickCandidates, activate, clickable,
+    errText, logObj, describeElement, clickCandidates, activate, clickable,
     domSnapshot, domDelta,
     text, rx, sleep, clickLabel, isForbidden,
     evidenceIn, deepestMatch, nearestCommonAncestor,

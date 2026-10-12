@@ -12,6 +12,7 @@ import { matchFields } from "../engine/matcher.js";
 import { normLabel, derivePattern } from "../engine/normalize.js";
 import { $, esc, show, setStatus, eligibilityHtml, roleHtml, assembledHtml, wireCopyText } from "./ui.js";
 import { makeInjector } from "./inject.js";
+import { logObj } from "../shared/log.js";
 
 const { inject, call } = makeInjector(() => state.tabId, "JAF");
 
@@ -42,6 +43,7 @@ export async function runPage({ jdOverride = null, rescanDom = true } = {}) {
   if (rescanDom) {
     await inject(["content/label.js", "content/scan.js"]);
     const scan = await call("scan");
+    logObj("[JAF popup] page scan", scan);
     if (!scan || scan.__error) {
       setStatus(`Could not read the page. ${scan && scan.__error ? scan.__error : ""}`, "red");
       return;

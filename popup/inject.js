@@ -8,6 +8,8 @@
 // Everything here logs. If a call fails you should be able to read what was
 // injected, what was sent, and the real stack, from the popup console.
 
+import { describeError, safeJson, logObj, errorObj } from "../shared/log.js";
+
 const PREFIX = "[JAF popup]";
 
 export function makeInjector(getTabId, namespace) {
@@ -19,8 +21,9 @@ export function makeInjector(getTabId, namespace) {
       console.log(`${PREFIX} injected ok`, files, res);
       return { ok: true };
     } catch (err) {
-      console.error(`${PREFIX} INJECTION FAILED for`, files, "tab", tabId, err);
-      return { ok: false, error: String(err && err.message ? err.message : err) };
+      const d = describeError(err);
+      errorObj(`${PREFIX} INJECTION FAILED for ${files.join(", ")} in tab ${tabId}`, d);
+      return { ok: false, error: d.text, errorDetail: d };
     }
   }
 
@@ -47,27 +50,43 @@ export function makeInjector(getTabId, namespace) {
           try {
             return await api[name](payload);
           } catch (err) {
-            return { __error: String(err && err.message ? err.message : err),
-                     __stack: String(err && err.stack ? err.stack : "").slice(0, 2000),
-                     __fn: name };
+            // Serialized here, in the page, because String(nonError) is
+            // "[object Object]" and that would destroy the diagnostic before it
+            // ever crossed back.
+            const described = err instanceof Error
+              ? { text: `${err.name}: ${err.message}`, stack: String(err.stack || "").slice(0, 2000) }
+              : { text: (() => {
+                    try {
+                      const j = JSON.stringify(err);
+                      if (j !== undefined) return j;
+                    } catch { /* cyclic or unserializable */ }
+                    // Last resort still has to say something: pull the usual
+                    // fields off by hand rather than letting it stringify to
+                    // "[object Object]".
+                    const bits = ["name", "message", "code", "reason"]
+                      .filter((k) => err && err[k] != null)
+                      .map((k) => `${k}=${err[k]}`);
+                    return bits.length ? bits.join(" ") : Object.prototype.toString.call(err);
+                  })(), stack: null };
+            return { __error: described.text, __stack: described.stack, __fn: name };
           }
         }
       });
     } catch (err) {
-      console.error(`${PREFIX} executeScript REJECTED for ${namespace}.${fnName}`, err);
-      return { __error: `executeScript rejected: ${err && err.message ? err.message : err}` };
+      const d = describeError(err);
+      errorObj(`${PREFIX} executeScript REJECTED for ${namespace}.${fnName}`, d);
+      return { __error: `executeScript rejected: ${d.text}`, __errorDetail: d };
     }
 
     if (!frames || !frames.length) {
-      console.error(`${PREFIX} ${namespace}.${fnName} returned no frames at all`, frames);
+      errorObj(`${PREFIX} ${namespace}.${fnName} returned no frames at all`, { frames, tabId });
       return { __error: "executeScript returned no frames. The tab may have navigated." };
     }
     const result = frames[0].result;
     if (result && result.__error) {
-      console.error(`${PREFIX} ${namespace}.${fnName} failed in the page:`, result.__error,
-        result.__stack || "", result.__available || result.__globals || "");
+      errorObj(`${PREFIX} ${namespace}.${fnName} FAILED in the page`, result);
     } else {
-      console.log(`${PREFIX} ${namespace}.${fnName} returned`, result);
+      logObj(`${PREFIX} ${namespace}.${fnName} returned`, result);
     }
     return result === undefined ? { __error: `${namespace}.${fnName} returned undefined.` } : result;
   }

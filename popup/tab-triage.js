@@ -10,6 +10,7 @@ import { triageAll } from "../engine/triage.js";
 import { boardReport } from "../engine/assess.js";
 import { $, esc, show, wireCopyText, flash, busy } from "./ui.js";
 import { makeInjector } from "./inject.js";
+import { describeError, safeJson, logObj, errorObj } from "../shared/log.js";
 
 const { inject, call } = makeInjector(() => state.tabId, "JAF_JR");
 
@@ -55,6 +56,7 @@ export async function runTriage() {
   }
   b.update("Reading cards");
   const scan = await call("scanBoard", toPlain());
+  logObj("[JAF popup] board scan", scan);
 
   if (!scan || scan.__error) {
     b.fail(`Could not read the board. ${scan && scan.__error ? scan.__error : "no response"}`);
@@ -132,29 +134,28 @@ async function runDump() {
 
   const first = state.result.rows[0].card.cardId;
   const rules = toPlain();
-  console.log("[JAF popup] dump sending rules keys:", Object.keys(rules), "cardId:", first);
+  logObj("[JAF popup] dump request", { ruleKeys: Object.keys(rules), cardId: first });
 
   let report;
   try {
     report = await call("dumpPanel", { rules, cardId: first });
   } catch (err) {
     console.error("[JAF popup] dump threw", err);
-    b.fail(`Dump threw: ${err && err.message ? err.message : err}`);
     $("tri-dump-text").textContent = String(err && err.stack ? err.stack : err);
     return;
   }
 
   if (report && report.error && report.detection) {
-    console.error("[JAF popup] detail view not detected", report.detection);
+    errorObj("[JAF popup] detail view NOT detected", report);
     const d = report.detection;
     b.fail(`${report.error} ${d.reason} Matched: ${d.evidenceMatched.join(", ") || "none"}. ` +
       `Did not match: ${d.evidenceMissed.join(", ")}. Body text was ${d.bodyTextLength} characters.`);
-    $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+    $("tri-dump-text").textContent = safeJson(report);
     $("tri-dump-out").hidden = false;
     return;
   }
   if (!report || report.__error) {
-    console.error("[JAF popup] dump failed", report);
+    errorObj("[JAF popup] dump FAILED", report);
     b.fail(`Dump failed: ${report && report.__error ? report.__error : "no response"}`);
     $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
     $("tri-dump-out").hidden = false;
@@ -166,6 +167,7 @@ async function runDump() {
     return;
   }
 
+  logObj("[JAF popup] dump report", report);
   const m = report.originalPostMatches || [];
   const anchors = (report.allPanelAnchors || []).length;
   const json = report.embeddedJson || {};
@@ -179,7 +181,7 @@ async function runDump() {
     `Opened via: ${report.openedVia || "unknown"}. ` +
     `Patterns in use: ${ORIGINAL_POST_PATTERNS.map((r) => r.source).join("  ")}`);
 
-  $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+  $("tri-dump-text").textContent = safeJson(report);
 }
 
 async function resetThisBoard() {
@@ -245,7 +247,12 @@ async function startHarvest() {
 
   // Fire and forget: the loop lives in the page, so the popup closing is fine.
   call("harvest", { rules: toPlain(), cardIds: rows.map((r) => r.card.cardId), urlByCardId })
-    .catch((err) => { $("tri-harvest-status").textContent = `Harvest could not start: ${err && err.message ? err.message : err}`; });
+    .catch((err) => {
+      const d = describeError(err);
+      errorObj("[JAF popup] harvest could not start", d);
+      $("tri-harvest-status").className = "note fail-line";
+      $("tri-harvest-status").textContent = `Harvest could not start: ${d.text}`;
+    });
 
   $("tri-auto-queue").onchange = async (ev) => {
     state.prefs = { ...state.prefs, autoQueue: ev.target.checked };

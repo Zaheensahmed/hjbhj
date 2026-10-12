@@ -17,6 +17,7 @@ import { parsePanel } from "./engine/harvest.js";
 import { parsePosting } from "./engine/posting.js";
 import { checkEligibility } from "./engine/eligibility.js";
 import { harvestSummaryMessage, earlyTerminationMessage } from "./engine/queue.js";
+import { describeError, safeJson, errorObj } from "./shared/log.js";
 
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await getProfile();
@@ -192,7 +193,9 @@ const handlers = {
       });
       return { ok: true };
     } catch (err) {
-      return { ok: false, why: String(err && err.message ? err.message : err) };
+      const d = describeError(err);
+      errorObj("[JAF worker] focusCard failed", d);
+      return { ok: false, why: d.text };
     }
   }
 };
@@ -202,6 +205,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!handler) return false;
   handler(msg.payload || {}, sender)
     .then(sendResponse)
-    .catch((err) => sendResponse({ error: String(err && err.message ? err.message : err) }));
+    .catch((err) => {
+      const d = describeError(err);
+      errorObj(`[JAF worker] handler ${msg.type} threw`, d);
+      sendResponse({ error: d.text, errorDetail: d });
+    });
   return true; // keeps the channel open for the async reply
 });

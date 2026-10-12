@@ -85,7 +85,11 @@
         el.classList.add(item.tier === "confident" ? "jaf-confident" : "jaf-review");
         applied.push({ jafId: item.targetJafId, ruleId: item.ruleId, tier: item.tier });
       } catch (err) {
-        failed.push({ ...item, why: String(err && err.message ? err.message : err) });
+        // Never "[object Object]": a thrown non-Error still has to be readable.
+        const why = err instanceof Error ? `${err.name}: ${err.message}`
+          : (() => { try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); } })();
+        console.error("[JAF fill] could not fill", item, err);
+        failed.push({ ...item, why });
       }
     }
 

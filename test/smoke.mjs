@@ -22,6 +22,7 @@ import { assess, harvestStateOf, boardReport, partitionQueue, STAGE2_VERDICTS } 
 import { isJobrightUrl } from "../engine/harvest.js";
 import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
+import { describeError, safeJson, logObj, errorObj } from "../shared/log.js";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -1820,10 +1821,10 @@ group("Injection contract: nothing fails silently");
   }
 
   const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
-  ok("the dump logs the rule keys it sent", /dump sending rules keys/.test(tri));
+  ok("the dump logs the rule keys it sent", /logObj\("\[JAF popup\] dump request"/.test(tri));
   ok("the dump logs a failed injection", /dump aborted: injection failed/.test(tri));
-  ok("the dump logs the raw failure object", /console\.error\("\[JAF popup\] dump failed", report\)/.test(tri));
-  ok("a failed dump still shows the raw response", /JSON\.stringify\(report, null, 2\)/.test(tri));
+  ok("the dump logs the raw failure object", /errorObj\("\[JAF popup\] dump FAILED", report\)/.test(tri));
+  ok("a failed dump still shows the raw response", /safeJson\(report\)/.test(tri));
 }
 
 
@@ -1978,6 +1979,90 @@ group("Popup feedback: no long action is silent");
   const css = fs.readFileSync(path.join(root, "popup/popup.css"), "utf8");
   ok("a busy button is visibly busy", /button\[data-busy\]/.test(css) && /cursor: progress/.test(css));
   ok("a failed line is visually distinct", /\.fail-line/.test(css));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Diagnostics are readable: nothing becomes [object Object]");
+{
+  // The failure this fixes: String(nonErrorObject) is "[object Object]", and
+  // once that string is stored in an __error field the diagnostic is gone
+  // before anything can display it.
+  const thrown = { code: "ENOENT", detail: { panel: null, evidence: [] } };
+  ok("a plain object keeps its contents", describeError(thrown).text === '{"code":"ENOENT","detail":{"panel":null,"evidence":[]}}',
+    describeError(thrown).text);
+  ok("it is never the useless string", describeError(thrown).text !== "[object Object]");
+  ok("the raw value is kept alongside the text", describeError(thrown).raw === thrown);
+
+  const err = new TypeError("rules.FORBIDDEN_CLICK is not iterable");
+  ok("an Error keeps its name and message", describeError(err).text === "TypeError: rules.FORBIDDEN_CLICK is not iterable");
+  ok("an Error keeps its stack", typeof describeError(err).stack === "string" && describeError(err).stack.length > 0);
+
+  ok("a string passes through", describeError("broke").text === "broke");
+  ok("null and undefined do not throw", describeError(null).text === "null" && describeError(undefined).text === "undefined");
+  ok("an array keeps its elements", describeError([1, { a: 2 }]).text === '[1,{"a":2}]');
+  ok("a DOMException-like object keeps both fields",
+    describeError({ name: "NotFoundError", message: "no frame" }).text.includes("NotFoundError"));
+
+  // safeJson has to survive whatever a report contains.
+  const circular = { a: 1 }; circular.self = circular;
+  ok("safeJson survives a cycle", /\[circular\]/.test(safeJson(circular)));
+  ok("safeJson renders a RegExp readably", safeJson({ re: /abc/i }).includes("/abc/i"));
+  ok("safeJson renders a function readably", safeJson({ f: function named() {} }).includes("[function named]"));
+  ok("safeJson nests an Error rather than emptying it",
+    safeJson({ e: new Error("boom") }).includes("boom"));
+  ok("safeJson never returns undefined", typeof safeJson(undefined) === "string");
+  ok("safeJson is indented by default", safeJson({ a: 1 }).includes("\n"));
+
+  ok("logObj and errorObj exist for the two-line pattern",
+    typeof logObj === "function" && typeof errorObj === "function");
+}
+
+// ---------------------------------------------------------------------------
+group("Diagnostics are readable: applied everywhere");
+{
+  const files = ["popup/inject.js", "popup/tab-triage.js", "popup/tab-page.js", "popup/popup.js",
+                 "background.js", "content/fill.js", "content/jobright-detect.js", "tracker/tracker.js"];
+
+  // The pattern that destroyed the information.
+  const offenders = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(root, f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+    if (/(err|e)\s*&&\s*\1\.message\s*\?\s*\1\.message\s*:\s*\1/.test(src)) offenders.push(f);
+    if (/String\(\s*(err|e)\s*\)/.test(src)) offenders.push(`${f} (String(err))`);
+  }
+  ok("no file coerces a thrown value straight to a string", offenders.length === 0, offenders.join(", "));
+
+  const inj = fs.readFileSync(path.join(root, "popup/inject.js"), "utf8");
+  ok("the injector describes errors rather than stringifying them", /describeError\(err\)/.test(inj));
+  ok("the in-page catch serializes before the value crosses back", /JSON\.stringify\(err\)/.test(inj));
+  ok("the in-page catch explains why", /destroy the diagnostic before it/.test(inj));
+  ok("a failed call logs the whole result object", /errorObj\(`\$\{PREFIX\} \$\{namespace\}\.\$\{fnName\} FAILED in the page`, result\)/.test(inj));
+  ok("a successful call logs its result too", /logObj\(`\$\{PREFIX\} \$\{namespace\}\.\$\{fnName\} returned`, result\)/.test(inj));
+
+  const log = fs.readFileSync(path.join(root, "shared/log.js"), "utf8");
+  ok("logObj passes the object as its own console argument", /console\.log\(label, obj\)/.test(log));
+  ok("logObj also prints pretty JSON for copying", /JSON:\\n\$\{safeJson\(obj\)\}/.test(log));
+  ok("errorObj does both as well",
+    /console\.error\(label, obj\)/.test(log) && /console\.error\(`\$\{label\} — JSON/.test(log));
+
+  const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
+  ok("the board scan is logged in full", /logObj\("\[JAF popup\] board scan", scan\)/.test(tri));
+  ok("the dump request is logged", /logObj\("\[JAF popup\] dump request"/.test(tri));
+  ok("the dump report is logged in full", /logObj\("\[JAF popup\] dump report", report\)/.test(tri));
+  ok("a detection failure logs the whole report, not just the reason",
+    /errorObj\("\[JAF popup\] detail view NOT detected", report\)/.test(tri));
+  ok("the dump pane renders through safeJson", /safeJson\(report\)/.test(tri));
+  ok("a harvest start failure is logged and shown", /harvest could not start/.test(tri));
+
+  const det = fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8");
+  ok("content scripts have their own serializer, since they cannot import", /function errText\(err\)/.test(det));
+  ok("content scripts can log expandably too", /function logObj\(label, obj\)/.test(det));
+
+  const bg = fs.readFileSync(path.join(root, "background.js"), "utf8");
+  ok("the worker describes handler errors", /errorObj\(`\[JAF worker\] handler \$\{msg\.type\} threw`, d\)/.test(bg));
+  ok("the worker returns the detail, not just the text", /errorDetail: d/.test(bg));
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);

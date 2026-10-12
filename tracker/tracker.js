@@ -10,6 +10,12 @@
 (() => {
   const T = globalThis.JAF_TRACKER;
   const $ = (id) => document.getElementById(id);
+  // String(nonError) is "[object Object]", which throws away the only thing
+  // worth reading. Same rule as shared/log.js, inlined because this page loads
+  // as a classic script.
+  const errText = (err) => err instanceof Error ? `${err.name}: ${err.message}`
+    : typeof err === "string" ? err
+    : (() => { try { return JSON.stringify(err); } catch { return Object.prototype.toString.call(err); } })();
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   const TODAY = new Date();
@@ -42,7 +48,8 @@
       seedSource = loaded.source;
     } catch (err) {
       $("load").hidden = false;
-      $("load-why").textContent = String(err && err.message ? err.message : err);
+      console.error("[JAF tracker] could not load data", err);
+      $("load-why").textContent = errText(err);
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL) {
         $("ext-url").textContent = chrome.runtime.getURL("tracker/index.html");
       }
