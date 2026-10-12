@@ -106,6 +106,17 @@
       <label class="check"><input type="checkbox" id="tri-show-dismissed"> show dismissed</label>
     </div>
     <p class="note" id="tri-status">Open a Jobright board and scan it.</p>
+
+    <div id="tri-harvest" hidden>
+      <div class="row">
+        <button id="tri-harvest-run">Harvest details</button>
+        <button id="tri-harvest-stop" hidden>Stop</button>
+        <label class="check"><input type="checkbox" id="tri-harvest-shortlist"> shortlisted only</label>
+      </div>
+      <p class="note" id="tri-harvest-status"></p>
+      <p class="note">The loop runs in the page, so you can close this popup and switch tabs. It opens each card, reads the panel, closes it with the X, and waits 3 to 6 seconds. It never clicks Apply, Easy Apply, Save or Dismiss, and it reads the Original Job Post link rather than clicking it.</p>
+    </div>
+
     <div id="tri-out"></div>
   </div>
 

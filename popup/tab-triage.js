@@ -4,8 +4,8 @@
 // and ranks. Stage 1 has no job description text, so the best verdict available
 // is REVIEW. Nothing here clicks anything on the page except a scroll-into-view.
 
-import { getTriage, dismissCard, restoreCard, setShortlisted } from "../shared/store.js";
-import { toPlain } from "../rules/jobright-rules.js";
+import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, getHarvestProgress } from "../shared/store.js";
+import { toPlain, HARVEST } from "../rules/jobright-rules.js";
 import { triageAll } from "../engine/triage.js";
 import { $, esc, show, wireCopyText, flash } from "./ui.js";
 
@@ -15,6 +15,12 @@ export function initTriageTab({ tabId }) {
   state.tabId = tabId;
   $("tri-scan").onclick = () => runTriage();
   $("tri-show-dismissed").onchange = (ev) => { state.showDismissed = ev.target.checked; render(); };
+  $("tri-harvest-run").onclick = () => startHarvest();
+  $("tri-harvest-stop").onclick = async () => {
+    await setHarvestStop(true);
+    $("tri-harvest-status").textContent = "Stop requested. The loop finishes the card it is on, keeps everything already read, and ends.";
+  };
+  pollProgress();
 }
 
 export function isJobright(url) {
@@ -50,7 +56,60 @@ export async function runTriage() {
   state.scan = scan;
   state.store = await getTriage();
   state.result = triageAll(scan.cards, state.store);
+  show("tri-harvest", scan.cards.length > 0);
   render();
+}
+
+// -------------------------------------------------------------- stage 2
+
+async function startHarvest() {
+  if (!state.result) return;
+
+  const rows = $("tri-harvest-shortlist").checked
+    ? state.result.rows.filter((r) => r.shortlisted)
+    : state.result.rows.filter((r) => r.verdict === "REVIEW");
+
+  if (!rows.length) {
+    $("tri-harvest-status").textContent = $("tri-harvest-shortlist").checked
+      ? "Nothing is shortlisted yet."
+      : "No cards came out as REVIEW, so there is nothing worth harvesting.";
+    return;
+  }
+
+  const urlByCardId = {};
+  for (const r of rows) urlByCardId[r.card.cardId] = r.card.listingUrl;
+
+  await setHarvestStop(false);
+  await inject(["content/jobright-harvest.js"]);
+
+  $("tri-harvest-run").hidden = true;
+  $("tri-harvest-stop").hidden = false;
+  $("tri-harvest-status").textContent =
+    `Starting on ${Math.min(rows.length, HARVEST.maxCards)} card${rows.length === 1 ? "" : "s"}` +
+    `${rows.length > HARVEST.maxCards ? ` (capped from ${rows.length})` : ""}. ` +
+    `Roughly ${Math.ceil(rows.length * (HARVEST.gapMinMs + HARVEST.gapMaxMs) / 2 / 60000)} to ${Math.ceil(rows.length * (HARVEST.gapMaxMs + HARVEST.renderTimeoutMs) / 60000)} minutes. You can close this popup.`;
+
+  // Fire and forget: the loop lives in the page, so the popup closing is fine.
+  call("harvest", { rules: toPlain(), cardIds: rows.map((r) => r.card.cardId), urlByCardId })
+    .catch((err) => { $("tri-harvest-status").textContent = `Harvest could not start: ${err && err.message ? err.message : err}`; });
+
+  pollProgress();
+}
+
+async function pollProgress() {
+  const p = await getHarvestProgress();
+  if (!p) return;
+  const running = !p.finishedAt;
+  $("tri-harvest-run").hidden = running;
+  $("tri-harvest-stop").hidden = !running;
+
+  const bits = [`${p.done} harvested`, `${p.failed} failed`, `of ${p.total}`];
+  if (p.current && running) bits.push(`on ${p.current}`);
+  if (p.stoppedEarly) bits.push(`ended early: ${p.stopReason}`);
+  if (p.refusals && p.refusals.length) bits.push(`${p.refusals.length} click${p.refusals.length === 1 ? "" : "s"} refused by policy`);
+  $("tri-harvest-status").textContent = bits.join(", ") + ".";
+
+  if (running) setTimeout(pollProgress, 2000);
 }
 
 function render() {
@@ -111,6 +170,7 @@ function rowHtml(r, i) {
       ${c.applyButtons.length ? `<div class="sub">apply affordance present: ${c.applyButtons.map(esc).join(", ")}. Never clicked.</div>` : ""}
       <ul class="reasons">${reasons.map((x) => `<li class="r-${esc(x.kind)}">${esc(x.text)}</li>`).join("")}</ul>
       ${r.referralLead ? `<div class="referral">Referral lead: ${esc(r.referralLead.text)}</div>` : ""}
+      ${harvestedHtml(state.store.harvested[c.listingUrl])}
       <div class="row">
         ${c.listingUrl ? `<a class="sub" href="${esc(c.listingUrl)}" target="_blank" rel="noreferrer">listing</a>` : `<span class="blank">no listing URL read</span>`}
         <button class="small ghost" data-copy-text="${esc(c.rawText)}">Raw text</button>
@@ -121,6 +181,33 @@ function rowHtml(r, i) {
     <td>${c.listingUrl ? `<button class="small ghost" data-dismiss="${i}" title="Dismiss, persisted by listing URL">x</button>` : ""}</td>
   </tr>`;
 }
+
+function harvestedHtml(h) {
+  if (!h) return "";
+  if (h.harvestStatus !== "ok") {
+    return `<div class="harvested bad">Harvest failed: ${esc(h.why || "unknown")}</div>`;
+  }
+  const r = h.record;
+  const e = h.eligibility;
+  const sub = r.match.subscores;
+  return `<div class="harvested">
+    <div><strong>Harvested.</strong> ${r.match.overall != null ? r.match.overall + "% overall" : "no overall match read"}
+      &middot; experience ${fmt(sub.experienceLevel)} &middot; skill ${fmt(sub.skill)} &middot; education ${fmt(sub.educationMatch)}</div>
+    ${e.blocked
+      ? `<div class="h-blocked"><strong>BLOCKED on the real requirements.</strong>${e.blockers.map((b) => `<div>${esc(b.filter)}<blockquote>${esc(b.sentence)}</blockquote><em>${esc(b.why)}</em></div>`).join("")}</div>`
+      : e.flags.length
+        ? `<div class="h-flags">${e.flags.map((f) => `<div>${esc(f.filter)}<blockquote>${esc(f.sentence)}</blockquote><em>${esc(f.argue)}</em></div>`).join("")}</div>`
+        : `<div class="h-clear">No blockers in the Required or Preferred text.</div>`}
+    ${r.insider.leads.length ? `<div class="referral">${r.insider.leads.map((l) => esc(l.text) + " " + l.people.map((p) => esc(p.name) + (p.affiliation ? ` (${esc(p.affiliation)})` : "")).join(", ")).join(" / ")}</div>` : ""}
+    <div class="sub">required ${r.required.length} &middot; preferred ${r.preferred.length} &middot; responsibilities ${r.responsibilities.length} &middot; benefits ${r.benefits.length}</div>
+    ${r.benefits.some((b) => /relocat|housing/i.test(b)) ? `<div class="sub">relocation or housing: ${r.benefits.filter((b) => /relocat|housing/i.test(b)).map(esc).join("; ")}</div>` : ""}
+    ${r.qualificationTags.length ? `<div class="sub">tags you hold (low confidence): ${r.qualificationTags.filter((t) => t.marked).map((t) => esc(t.text)).join(", ") || "none detected"}</div>` : ""}
+    <div class="sub">destination: ${r.destinationUrl ? `<a href="${esc(r.destinationUrl)}" target="_blank" rel="noreferrer">${esc(r.destinationUrl.slice(0, 60))}</a>` : "none"}${r.resolvesOnOpen ? ` <span class="blank">resolves on open</span>` : ""}</div>
+    ${r.missing.length ? `<div class="blank">could not read: ${r.missing.map(esc).join(", ")}</div>` : ""}
+  </div>`;
+}
+
+const fmt = (v) => (v == null ? "not read" : typeof v === "number" ? v + "%" : String(v));
 
 function wire() {
   const container = $("tri-out");

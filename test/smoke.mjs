@@ -16,6 +16,7 @@ import { matchFields } from "../engine/matcher.js";
 import { normLabel } from "../engine/normalize.js";
 import { buildReport, reportToText, sectionText, SECTIONS, SECTION_TITLES } from "../engine/report.js";
 import { triageCard, triageAll, VERDICTS } from "../engine/triage.js";
+import { parsePanel, splitSections, bulletsOf, parseInsider, parseMatch, resolveDestination, parseQualificationTags } from "../engine/harvest.js";
 import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
 
@@ -941,9 +942,243 @@ group("Feature 3: rules and scanner hygiene");
 
   const triTab = stripComments(fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8"));
   ok("the triage tab clicks nothing on the page", !/"click"|'click'|\.click\s*\(/.test(triTab));
-  ok("the triage tab calls only scanBoard and focusCard",
-    [...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].every((m) => ["scanBoard", "focusCard"].includes(m[1])),
+  ok("the triage tab calls only scanBoard, focusCard and harvest",
+    [...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].every((m) => ["scanBoard", "focusCard", "harvest"].includes(m[1])),
     JSON.stringify([...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].map((m) => m[1])));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Feature 4: panel parsing");
+{
+  const PANEL = [
+    "Acme Defense", "Posted 2 days ago", "Security Engineering Intern",
+    "Your City, MD", "Onsite", "$25 - $32 / hour", "Internship", "Start in 2027 Summer",
+    "Acme Defense builds secure telemetry systems for industrial customers across the mid-Atlantic and beyond.",
+    "82% match", "Experience Level 70%", "Skill 90%", "Education Match 65%",
+    "U.S. Citizen Only", "Security Clearance", "142 applicants",
+    "Insider Connection",
+    "Beyond Your Network (4)", "Dana Reed", "@Acme Defense", "Jo Patel",
+    "From Your Previous Company", "Sam Okafor", "Previously@Example Org Inc.",
+    "From Your School", "Priya Nair", "@Example State Universi...", "Find Any Email",
+    "Responsibilities", "- Assess embedded device security", "- Write proof-of-concept mitigations",
+    "Qualification",
+    "Required", "- Must graduate in December 2027 or later", "- Must remain enrolled through the internship",
+    "- Minimum GPA of 3.0", "- Must be authorized to work in the US",
+    "Preferred", "- Experience with Ghidra", "- Familiarity with MQTT",
+    "Benefits", "- $1,500 relocation stipend", "- Corporate housing provided for the summer term", "- Health insurance",
+    "Company", "Founded 2011", "Headquarters: Columbia, MD", "850 employees", "acmedefense.com", "Glassdoor 4.1", "Series C"
+  ].join("\n");
+
+  const r = parsePanel({
+    panelText: PANEL,
+    links: [{ text: "Original Job Post", href: "https://acme.example/careers/123" }, { text: "Share", href: "#" }],
+    tagElements: [
+      { text: "Python", className: "tag tag-match", hasIcon: false },
+      { text: "Ghidra", className: "tag", hasIcon: false },
+      { text: "Linux", className: "tag", hasIcon: true }
+    ],
+    jobrightUrl: "https://jobright.ai/jobs/info/abc"
+  });
+
+  // sections
+  ok("responsibilities are parsed as bullets", r.responsibilities.length === 2 && r.responsibilities[0] === "Assess embedded device security");
+  ok("required bullets are parsed", r.required.length === 4, JSON.stringify(r.required));
+  ok("preferred bullets are parsed separately", r.preferred.length === 2 && r.preferred[0] === "Experience with Ghidra");
+  ok("required and preferred do not bleed into each other", !r.required.some((b) => /Ghidra/.test(b)));
+  ok("benefits are captured in full", r.benefits.length === 3);
+  ok("relocation terms are captured", r.benefits.some((b) => /relocation stipend/i.test(b)));
+  ok("housing terms are captured", r.benefits.some((b) => /corporate housing/i.test(b)));
+
+  // match panel: three sub-scores, separately
+  ok("the overall match is captured", r.match.overall === 82);
+  ok("Experience Level is captured on its own", r.match.subscores.experienceLevel === 70);
+  ok("Skill is captured on its own", r.match.subscores.skill === 90);
+  ok("Education Match is captured on its own", r.match.subscores.educationMatch === 65);
+  ok("the three sub-scores are distinct values", new Set(Object.values(r.match.subscores)).size === 3);
+  ok("a worded sub-score is kept as a word, not coerced to a number",
+    parseMatch("Experience Level: Strong").subscores.experienceLevel === "Strong");
+
+  // insider connection
+  ok("all three insider buckets exist", ["beyond_network", "previous_company", "school"].every((k) => k in r.insider.buckets));
+  ok("the beyond-network count comes from the heading", r.insider.buckets.beyond_network.count === 4);
+  ok("beyond-network names are captured", r.insider.buckets.beyond_network.people.some((p) => p.name === "Dana Reed"));
+  ok("an affiliation attaches to the name above it",
+    r.insider.buckets.beyond_network.people.find((p) => p.name === "Dana Reed").affiliation === "Acme Defense");
+  ok("the previous-company bucket captures name and affiliation",
+    r.insider.buckets.previous_company.people[0].name === "Sam Okafor" &&
+    r.insider.buckets.previous_company.people[0].affiliation === "Example Org Inc.");
+  ok("the school bucket captures name and truncated affiliation",
+    r.insider.buckets.school.people[0].name === "Priya Nair" &&
+    /Example State University/.test(r.insider.buckets.school.people[0].affiliation));
+  ok("school and previous company surface as referral leads", r.insider.leads.length === 2);
+  ok("the school lead is surfaced prominently", r.insider.leads.some((l) => l.kind === "school"));
+  ok("beyond-network is NOT a referral lead", !r.insider.leads.some((l) => l.kind === "beyond_network"));
+
+  // Find Any Email is never touched and never stored, anywhere in the record.
+  ok("Find Any Email appears nowhere in the parsed record",
+    !/find any email/i.test(JSON.stringify(r)));
+
+  // qualification tags
+  ok("qualification tags are captured with their marked state", r.qualificationTags.length === 3);
+  ok("a class-marked tag reads as held", r.qualificationTags.find((t) => t.text === "Python").marked === true);
+  ok("an unmarked tag reads as not held", r.qualificationTags.find((t) => t.text === "Ghidra").marked === false);
+  ok("an icon also counts as marked", r.qualificationTags.find((t) => t.text === "Linux").marked === true);
+  ok("every marked verdict carries low confidence", r.qualificationTags.every((t) => t.markedConfidence === "low"));
+  ok("the raw className travels so the heuristic can be corrected",
+    r.qualificationTags.every((t) => typeof t.className === "string"));
+
+  // company facts, lightly
+  ok("company facts are captured", r.companyFacts.founded === "2011" && r.companyFacts.headquarters === "Columbia, MD");
+  ok("employee count and rating are captured", r.companyFacts.employees === "850" && r.companyFacts.glassdoor === "4.1");
+
+  // header
+  ok("the start term is parsed from the header", r.header.startTerm.season === "summer" && r.header.startTerm.year === 2027);
+  ok("pay is captured", /\$25/.test(r.header.pay));
+  ok("the applicant count is captured", r.header.applicants === 142);
+  ok("match-panel tags are captured", r.header.tags.includes("Security Clearance") && r.header.tags.includes("U.S. Citizen Only"));
+
+  ok("a fully readable panel reports nothing missing", r.missing.length === 0, JSON.stringify(r.missing));
+  ok("the exact text eligibility ran against is kept", r.eligibilityInput.includes("Must graduate in December 2027 or later"));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 4: the destination link is read, never clicked");
+{
+  const JOBRIGHT = "https://jobright.ai/jobs/info/abc";
+
+  const real = resolveDestination([{ text: "Original Job Post", href: "https://acme.example/jobs/9" }], JOBRIGHT);
+  ok("a real href becomes the destination", real.destinationUrl === "https://acme.example/jobs/9" && real.resolvesOnOpen === false);
+
+  for (const href of ["#", "javascript:void(0)", "", "about:blank"]) {
+    const r = resolveDestination([{ text: "Original Job Post", href }], JOBRIGHT);
+    ok(`an href of "${href || "(empty)"}" stores the Jobright URL and marks resolves-on-open`,
+      r.destinationUrl === JOBRIGHT && r.resolvesOnOpen === true);
+  }
+
+  const none = resolveDestination([{ text: "Share", href: "https://x.test" }], JOBRIGHT);
+  ok("with no Original Job Post link the Jobright URL is stored", none.destinationUrl === JOBRIGHT && none.resolvesOnOpen === true);
+  ok("the reason is recorded", /no original job post link/i.test(none.via));
+  ok("an unrelated link is never mistaken for the destination", none.destinationUrl !== "https://x.test");
+  ok("Apply is never a source of the destination URL",
+    resolveDestination([{ text: "Apply with Autofill", href: "https://acme.example/apply" }], JOBRIGHT).destinationUrl === JOBRIGHT);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 4: eligibility against the real requirements");
+{
+  // This is what stage 1 could not do.
+  const req = (lines) => checkEligibility(profile, parsePosting({ text: lines.join("\n") + "\n" + "Filler requirement line. ".repeat(12) }));
+
+  const orLater = req(["Must graduate in December 2027 or later"]);
+  ok("an open-ended graduation floor does not block", !orLater.blocked, JSON.stringify(orLater.blockers.map((b) => b.why)));
+  ok("the floor is explained", orLater.cleared.some((c) => /open-ended floor/i.test(c.why)));
+
+  const orEarlier = req(["Must graduate no later than June 2028"]);
+  ok("a ceiling you miss does block", orEarlier.blocked, JSON.stringify(orEarlier.blockers));
+
+  const window2829 = req(["Must graduate between December 2028 and June 2030"]);
+  ok("a window containing 2029 does not block", !window2829.blocked);
+
+  const window27 = req(["Open to the class of 2026 and 2027 only"]);
+  ok("a closed list excluding 2029 blocks", window27.blocked);
+
+  const enrolled = req(["Must remain enrolled through the duration of the internship"]);
+  ok("staying enrolled is not read as an institution restriction", !enrolled.blocked, JSON.stringify(enrolled.blockers));
+
+  const gpa = req(["Minimum GPA of 3.0 required"]);
+  ok("a GPA floor is a soft flag with the real answer", !gpa.blocked && gpa.flags.some((f) => f.id === "gpa_floor"));
+  ok("the GPA flag gives the honest position", gpa.flags.find((f) => f.id === "gpa_floor").argue.includes("No college GPA yet"));
+
+  const clearance = req(["Must currently hold an active Secret clearance"]);
+  ok("an active clearance requirement blocks at stage 2", clearance.blocked);
+
+  const obtainable = req(["Must have the ability to obtain a Secret clearance"]);
+  ok("ability to obtain does not block at stage 2", !obtainable.blocked);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 4: the harvest loop's click policy");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const src = stripComments(fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8"));
+
+  // Every click must go through safeClick. Exactly one bare .click() is
+  // allowed: the one inside safeClick itself, after the refusal check.
+  const bareClicks = [...src.matchAll(/\.click\s*\(/g)].length;
+  ok("there is exactly one .click() in the file, inside safeClick", bareClicks === 1, String(bareClicks));
+  // Order matters more than proximity: the refusal check has to come first.
+  const scBody = (() => {
+    const from = src.indexOf("function safeClick");
+    return from === -1 ? "" : src.slice(from, src.indexOf("\n  }", from));
+  })();
+  ok("safeClick's body exists", scBody.length > 0);
+  ok("safeClick checks the forbidden list BEFORE it clicks",
+    scBody.includes("isForbidden(") && scBody.indexOf("isForbidden(") < scBody.indexOf(".click("));
+  ok("the one .click() in the file is the one inside safeClick", scBody.includes(".click("));
+  ok("safeClick records a refusal rather than clicking", /run\.refusals\.push/.test(src));
+
+  // The only deliberate click targets.
+  const whys = [...src.matchAll(/safeClick\([^,]+,\s*[`"']([^`"'$]*)/g)].map((m) => m[1].trim());
+  ok("the only things clicked on purpose are a card and a close control",
+    whys.every((w) => /^open card|^close/.test(w)), JSON.stringify(whys));
+
+  ok("the loop never submits", !/\.submit\s*\(|requestSubmit/.test(src));
+  ok("the loop makes no network request", !/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(src));
+  ok("the loop never touches the Find Any Email box", !/find\s*any\s*email/i.test(src));
+  ok("the loop never answers a Did-you-apply prompt", !/did\s*you\s*apply/i.test(src));
+  ok("the loop never marks anything applied", !/mark\s*as\s*applied/i.test(src));
+
+  // FORBIDDEN_CLICK must actually cover every button named in the brief.
+  const forbidden = (label) => JR.FORBIDDEN_CLICK.some((re) => re.test(label));
+  for (const label of [
+    "Apply with Autofill", "APPLY WITH AUTOFILL", "Easy Apply", "Apply Now",
+    "Save", "Save job", "Dismiss", "Not interested", "Find Any Email",
+    "Report Issue", "Share", "Did you apply?", "Mark as applied", "Submit"
+  ]) {
+    ok(`FORBIDDEN_CLICK refuses "${label}"`, forbidden(label));
+  }
+  ok("a close control is NOT forbidden", !forbidden("Close") && !forbidden("×"));
+  ok("a job card title is NOT forbidden", !forbidden("Security Engineering Intern"));
+  ok("the close patterns recognise the usual glyphs",
+    ["×", "✕", "x", "Close"].every((t) => JR.CLOSE_TEXTS.some((re) => re.test(t))));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 4: loop resilience");
+{
+  const src = fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8");
+
+  ok("waiting is wall-clock, not tick-counted", /Date\.now\(\)\s*-\s*started/.test(src));
+  ok("a hidden tab gets a multiplied budget, not a failure", /hiddenMultiplier/.test(src) && /document\.hidden/.test(src));
+  ok("nothing fails before a minimum number of polls", /polls\s*>=\s*rules\.HARVEST\.minPolls/.test(src));
+  ok("throttling is reported rather than hidden", /throttled/.test(src));
+
+  ok("a render timeout marks the card failed and continues", /harvest failed[\s\S]{0,600}continue;/.test(src));
+  ok("consecutive failures eventually stop the run", /maxConsecutiveFailures/.test(src));
+  ok("there is a hard cap on run length", /maxRunMs/.test(src) && /hard cap on run length/.test(src));
+  ok("there is a hard cap on cards", /maxCards/.test(src) && /slice\(0, rules\.HARVEST\.maxCards\)/.test(src));
+  ok("the gap between cards is randomized", /Math\.random\(\)/.test(src) && /gapMinMs/.test(src) && /gapMaxMs/.test(src));
+
+  ok("Stop is read from storage, so it works after the popup closes", /harvest_control/.test(src) && /readControl/.test(src));
+  ok("stopping preserves progress", /stopped by you/.test(src) && /writeProgress/.test(src));
+  ok("navigation ends the run cleanly", /beforeunload/.test(src) && /navigation/.test(src));
+  ok("progress is written after every card, not at the end",
+    (src.match(/await writeProgress\(\)/g) || []).length >= 4);
+  ok("each record is reported as it is read", /harvest:record/.test(src));
+
+  ok("the caps are sane", JR.HARVEST.gapMinMs >= 3000 && JR.HARVEST.gapMaxMs <= 6000 && JR.HARVEST.maxRunMs <= 60 * 60 * 1000);
+
+  // The service worker owns parsing and eligibility because a classic content
+  // script cannot import engine/.
+  const bg = fs.readFileSync(path.join(root, "background.js"), "utf8");
+  ok("the worker parses the panel", /parsePanel/.test(bg));
+  ok("the worker runs eligibility on the harvested text", /checkEligibility/.test(bg));
+  ok("the worker stores each record as it arrives", /putHarvested/.test(bg));
+  ok("a failed card is still stored, so it is visible", /harvest failed/.test(bg));
+  ok("records are keyed by listing URL", /payload\.listingUrl \|\|/.test(bg));
+  ok("the message channel stays open for the async reply", /return true;/.test(bg));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

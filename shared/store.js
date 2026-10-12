@@ -101,3 +101,12 @@ export const putHarvested = (url, record) =>
 export const setRun = (run) => mutateTriage((t) => { t.run = run; });
 
 export const clearTriage = () => chrome.storage.local.set({ [K.TRIAGE]: { ...EMPTY_TRIAGE } });
+
+// ------------------------------------------------------------ harvest control
+//
+// The loop runs in the page and polls these, rather than listening for a
+// message, so Stop still works after the popup has closed.
+
+export const getHarvestControl = () => get("harvest_control", { stop: false });
+export const setHarvestStop = (stop) => chrome.storage.local.set({ harvest_control: { stop: Boolean(stop), at: new Date().toISOString() } });
+export const getHarvestProgress = () => get("harvest_progress", null);

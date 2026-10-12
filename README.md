@@ -301,6 +301,67 @@ the known selectors miss and the text heuristic takes over, it says so. The fix
 loop is: copy the raw text, correct the pattern in `rules/jobright-rules.js`,
 rescan.
 
+## Jobright triage, stage 2: detail-panel harvest
+
+**Harvest details** injects a loop that runs **in the page**, not in the popup,
+so closing the popup or switching tabs does not stop it. Progress is written to
+storage after every card, so a stop, a navigation or a crash still leaves
+everything already read.
+
+Per card: open it, wait for the panel, read it, store it, close it with the
+panel's own X, wait a randomized 3 to 6 seconds, report progress.
+
+What it reads: the header (company, posted time, title, location, arrangement,
+pay, job type, start term, blurb, tags); the match panel's overall score **and
+its three sub-scores separately** (Experience Level, Skill, Education Match);
+all three Insider Connection buckets with names, counts and affiliations;
+responsibilities; the qualification tag row with each tag's marked state;
+**Required** and **Preferred** as separate bullet lists; benefits in full
+including relocation and housing; and company facts lifted from the panel text.
+
+Eligibility then runs against the real Required and Preferred text, which is
+what stage 1 could not do. The text it ran against is stored alongside the
+verdict, so a blocker is always traceable to the sentence that caused it.
+
+### The click policy
+
+Every click goes through `safeClick()`, which refuses anything matching
+`FORBIDDEN_CLICK`: Apply with Autofill, Easy Apply, Apply Now, Quick Apply,
+Save, Dismiss, Not interested, Share, Report Issue, Find Any Email, "Did you
+apply", Mark as applied, Submit. A refusal is recorded and reported on the run.
+
+Only two things are ever clicked on purpose: a card, to open it, and the panel's
+close control. There is exactly one `.click()` in
+`content/jobright-harvest.js`, inside `safeClick` and after the refusal check,
+and the suite asserts the count, the ordering, and that every `safeClick` call
+site is either "open card" or "close".
+
+The destination link is read from the **Original Job Post** `href`. It is never
+clicked, and Apply is never clicked to discover it. When the href is `#`,
+`javascript:`, empty or `about:blank`, the Jobright URL is stored and the record
+is marked **resolves on open**.
+
+The **Find Any Email** box is never used, and never stored, not even as raw
+text: the suite asserts the string appears nowhere in a parsed record.
+
+### Resilience
+
+| condition | behaviour |
+|-----------|-----------|
+| background-tab throttling | waits are wall-clock, the budget is multiplied while the tab is hidden, and nothing fails before a minimum number of polls. Slowness is reported, not treated as failure. |
+| panel never renders | card marked "harvest failed", loop continues, panel closed if one appeared |
+| five failures in a row | run stops and says the page has probably changed |
+| you navigate away | `beforeunload` ends the run cleanly; everything read is already stored |
+| hard caps | 60 cards, 45 minutes |
+| Stop | read from storage each iteration, so it works after the popup is closed. Finishes the current card and keeps everything. |
+
+A classic content script cannot import `engine/`, so the loop ships raw panel
+text to the service worker, which parses it with `engine/harvest.js`, runs
+eligibility, and stores the record keyed by listing URL. `engine/harvest.js` is
+pure, so the whole parser is tested against synthetic panel text.
+
+Same caveat as stage 1: **none of this has met a live Jobright page.**
+
 ## Eligibility
 
 Runs before anything is assembled. A hard blocker stops assembly entirely and

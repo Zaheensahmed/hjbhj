@@ -26,6 +26,20 @@ export const HARD_DETECTORS = [
         return { verdict: "ok", why: `Lists ${target}, which is your graduation year.` };
       }
       const lo = Math.min(...years), hi = Math.max(...years);
+
+      // "Must graduate in December 2027 or later" is an open-ended floor, not a
+      // list of acceptable years. Reading it as a list rejects every later
+      // graduation date, which is exactly backwards.
+      if (/\bor\s+(?:later|after|beyond)\b|\band\s+later\b|\bonwards?\b/i.test(matchText)) {
+        return target >= lo
+          ? { verdict: "ok", why: `An open-ended floor of ${lo} or later. You graduate ${target}.` }
+          : { verdict: "blocked", why: `Floor is ${lo} or later. You graduate ${target}.` };
+      }
+      if (/\bor\s+(?:earlier|before|sooner)\b|\bno later than\b|\bby\b/i.test(matchText)) {
+        return target <= hi
+          ? { verdict: "ok", why: `A ceiling of ${hi} or earlier. You graduate ${target}.` }
+          : { verdict: "blocked", why: `Ceiling is ${hi} or earlier. You graduate ${target}.` };
+      }
       if (/between|through|\bto\b|-/.test(matchText) && target >= lo && target <= hi) {
         return { verdict: "ok", why: `${target} falls inside the stated ${lo}-${hi} window.` };
       }

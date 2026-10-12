@@ -173,3 +173,132 @@ export function toPlain() {
     FIELD_PATTERNS, MATCH_PANEL_TAGS, APPLY_BUTTONS, LISTING_HREF_PATTERNS
   });
 }
+
+// ============================================================== stage 2
+// Detail-panel harvest. Same caveat as above: written without a live page.
+
+// A detail panel is recognised by its own content, not its class name.
+export const PANEL_EVIDENCE = [
+  /\binsider connection\b/i,
+  /\bqualification\b/i,
+  /\boriginal job post\b/i,
+  /\bresponsibilit(?:y|ies)\b/i
+];
+
+export const PANEL_SELECTORS = [
+  "[class*='drawer']",
+  "[class*='Drawer']",
+  "[class*='detail']",
+  "[class*='Detail']",
+  "[role='dialog']",
+  "aside",
+  "[class*='panel']"
+];
+
+// The X at top-left of the panel. Candidates are filtered by FORBIDDEN_CLICK
+// first, then the one nearest the panel's top-left corner wins.
+export const CLOSE_SELECTORS = [
+  "[aria-label*='close' i]",
+  "[title*='close' i]",
+  "[class*='close']",
+  "[class*='Close']",
+  "button"
+];
+export const CLOSE_TEXTS = [/^[\u00d7\u2715\u2716\u2717\u274c x]$/i, /^close$/i];
+
+// NOTHING matching these is ever clicked, whatever else matches. safeClick()
+// in content/jobright-harvest.js refuses and records a refusal.
+export const FORBIDDEN_CLICK = [
+  /apply\s*with\s*autofill/i,
+  /easy\s*apply/i,
+  /apply\s*now/i,
+  /quick\s*apply/i,
+  /\bapply\b/i,
+  /\bsave\b/i,
+  /\bdismiss\b/i,
+  /\bhide\b/i,
+  /not\s*interested/i,
+  /find\s*any\s*email/i,
+  /\breport\s*issue\b/i,
+  /\bshare\b/i,
+  /did\s*you\s*apply/i,
+  /\bmark\s*as\s*applied\b/i,
+  /\bsubmit\b/i,
+  /\bupgrade\b/i,
+  /\bsubscribe\b/i
+];
+
+// Section headings, matched against whole lines of the panel's text.
+export const SECTION_HEADINGS = [
+  { key: "insider", patterns: [/^insider connection/i] },
+  { key: "responsibilities", patterns: [/^responsibilit(?:y|ies)\b/i] },
+  { key: "qualification", patterns: [/^qualification/i] },
+  { key: "required", patterns: [/^required\b/i, /^requirements?\b/i, /^minimum qualifications?\b/i] },
+  { key: "preferred", patterns: [/^preferred\b/i, /^nice to have\b/i, /^preferred qualifications?\b/i] },
+  { key: "benefits", patterns: [/^benefits?\b/i, /^perks?\b/i, /^compensation and benefits\b/i] },
+  { key: "company", patterns: [/^company\b/i, /^about (?:the )?company\b/i, /^about us\b/i] }
+];
+
+export const INSIDER_BUCKETS = [
+  { key: "beyond_network", patterns: [/^beyond your network/i] },
+  { key: "previous_company", patterns: [/^from your previous compan(?:y|ies)/i] },
+  { key: "school", patterns: [/^from your school/i] }
+];
+
+// Affiliation lines under an insider name.
+export const AFFILIATION_PATTERNS = [
+  /^previously\s*@\s*(.+)$/i,
+  /^@\s*(.+)$/,
+  /^(?:currently\s*)?at\s+(.+)$/i
+];
+
+// The match panel's overall score and its three sub-scores, captured separately.
+export const MATCH_SUBSCORES = [
+  { key: "experienceLevel", label: "Experience Level", patterns: [/experience\s*level\D{0,20}(\d{1,3})\s*%/i, /experience\s*level\s*[:\-]?\s*(low|fair|good|strong|high|excellent)\b/i] },
+  { key: "skill", label: "Skill", patterns: [/skills?\s*(?:match)?\D{0,20}(\d{1,3})\s*%/i, /skills?\s*(?:match)?\s*[:\-]?\s*(low|fair|good|strong|high|excellent)\b/i] },
+  { key: "educationMatch", label: "Education Match", patterns: [/education\s*(?:match)?\D{0,20}(\d{1,3})\s*%/i, /education\s*(?:match)?\s*[:\-]?\s*(low|fair|good|strong|high|excellent)\b/i] }
+];
+
+export const OVERALL_MATCH_PATTERNS = [
+  /\b(\d{1,3})\s*%\s*match\b/i,
+  /\bmatch\s*score\D{0,10}(\d{1,3})\s*%/i
+];
+
+export const ORIGINAL_POST_PATTERNS = [/original\s*job\s*post/i, /view\s*original/i, /original\s*posting/i];
+
+// Hrefs that are not a real destination, so the Jobright URL is stored instead
+// and the record is marked "resolves on open".
+export const UNRESOLVED_HREF = [/^#/, /^javascript:/i, /^$/, /^about:blank$/i];
+
+export const COMPANY_FACT_PATTERNS = {
+  founded: [/\bfounded\s*(?:in)?\s*[:\-]?\s*(\d{4})/i],
+  headquarters: [/\b(?:headquarters|hq|headquartered in)\s*[:\-]?\s*([^\n]{3,60})/i],
+  employees: [/\b([\d,]+(?:\s*-\s*[\d,]+)?\+?)\s*employees\b/i, /\bemployees?\s*[:\-]\s*([^\n]{1,40})/i],
+  website: [/\b((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+\.(?:com|io|ai|net|org|co)(?:\/[^\s]*)?)/i],
+  glassdoor: [/\bglassdoor\D{0,20}([0-5](?:\.\d)?)\b/i],
+  funding: [/\b(series\s+[a-z]|seed|ipo|public|bootstrapped|acquired)\b/i]
+};
+
+// A tag in the qualification row that you already hold is visually marked.
+// Marking cannot be read from text, so these are DOM heuristics and every
+// result carries low confidence plus the raw className for correcting them.
+export const TAG_MARKED_CLASS = [/match/i, /active/i, /selected/i, /checked/i, /owned/i, /\bhave\b/i, /highlight/i, /success/i];
+
+export const HARVEST = {
+  // Wall-clock budget for one panel to render.
+  renderTimeoutMs: 15000,
+  // A hidden tab has its timers throttled, so sleeps stretch. The budget is
+  // multiplied rather than the slowness being treated as a failure.
+  hiddenMultiplier: 4,
+  // Never fail before polling this many times, however long the gaps were.
+  minPolls: 4,
+  pollMs: 250,
+  // Randomized gap between cards.
+  gapMinMs: 3000,
+  gapMaxMs: 6000,
+  // Hard caps on one run.
+  maxCards: 60,
+  maxRunMs: 45 * 60 * 1000,
+  // Give up on a card after this many consecutive failures.
+  maxConsecutiveFailures: 5
+};
