@@ -1,0 +1,798 @@
+{
+  "_README": "EXAMPLE FILE. Copy to data/profile.json and replace the placeholder values with your own. Structure, ids, tags and rules are identical to a real profile, so the engine and most of the test suite work against this file unchanged. Experience descriptions and skills are NOT fixed strings; they are pools of individually true claims, each tagged. The assembler selects and orders claims relevant to a given posting. It may never invent, embellish, or combine claims into something stronger than any single claim states.",
+  "_last_updated": "2026-10-12",
+  "identity": {
+    "full_name": "Your Name",
+    "first_name": "Your",
+    "last_name": "Name",
+    "email": "you@example.com",
+    "phone": "(555) 555-0100",
+    "linkedin": "https://www.linkedin.com/in/your-handle",
+    "street_address": "1 Example Street",
+    "city": "Your City",
+    "state": "MD",
+    "zip": "20000",
+    "country": "United States"
+  },
+  "work_authorization": {
+    "legally_authorized_to_work_us": "Yes",
+    "require_visa_sponsorship": "No",
+    "visa_status_dropdown": "A citizen of the U.S.",
+    "citizenship": "U.S. Citizen",
+    "dual_citizenship": "No",
+    "age_18_or_over": "Yes",
+    "valid_drivers_license": "Yes",
+    "security_clearance_current": "No",
+    "clearance_eligible": "Yes (U.S. citizen)",
+    "selective_service_registered": "Believes yes, UNCONFIRMED - verify at sss.gov before any federal application",
+    "criminal_record": "No"
+  },
+  "education": {
+    "current_school": "Example State University",
+    "school_city_state": "Your City, MD",
+    "degree_type": "Bachelor of Science",
+    "major": "Information Systems",
+    "minor": "Computer Science",
+    "field_of_study_dropdown_primary": "Information Systems",
+    "field_of_study_dropdown_fallback": "Information Systems Management",
+    "field_of_study_NEVER_SELECT": "Any cybersecurity-named variant. the school's IS degree has no cyber track.",
+    "start_date": "August 2026",
+    "expected_graduation": "May 2029",
+    "graduation_mm_yy": "05/29",
+    "transfer_credits_at_entry": 33,
+    "current_class_standing": "Sophomore (by credit standing)",
+    "class_standing_fall_2027": "Junior",
+    "penultimate_year": "2027-2028",
+    "final_year": "2028-2029",
+    "class_year_explanation": "Started at your school in August 2026 but entered with 33 credits, so at sophomore standing. On a three-year track graduating May 2029.",
+    "college_gpa": "None yet - first semester in progress as of Oct 2026",
+    "high_school": "Example High School",
+    "high_school_program": "Example magnet programme",
+    "high_school_city_state": "Your Town, MD",
+    "high_school_graduation": "May 2026",
+    "high_school_gpa_unweighted": "3.50",
+    "high_school_gpa_weighted": "4.20",
+    "gpa_rule": "A field asking for GPA on a 4.0 scale means unweighted: 3.50. Only give 4.20 when the field explicitly says weighted or allows above 4.0.",
+    "current_coursework": [
+      "IS 247 Computer Programming II - Java, object-oriented programming, data structures (stacks, queues, binary search trees, sets, maps, graphs), searching, sorting, algorithm analysis",
+      "IS 300 Management Information Systems",
+      "MGMT 210 The Practice of Management"
+    ],
+    "high_school_coursework": [
+      "Cyberforensics",
+      "Computer Networking",
+      "Analysis of Algorithms"
+    ]
+  },
+  "experience": [
+    {
+      "id": "gmu_drone",
+      "employer": "Example University",
+      "department": "Example Lab",
+      "city": "Your City",
+      "state": "MD",
+      "title": "Research Intern",
+      "focus": "Drone Wireless and Application Security",
+      "start": "06/01/2025",
+      "end": "11/01/2025",
+      "supervisor": "Dr. Example Supervisor",
+      "supervisor_email": "supervisor@example.edu",
+      "paid": false,
+      "reason_for_leaving": "College started.",
+      "claims": [
+        {
+          "text": "Example claim 1 for gmu_drone, tagged offensive, vuln, all",
+          "tags": [
+            "offensive",
+            "vuln",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 2 for gmu_drone, tagged offensive, defensive, networking, all",
+          "tags": [
+            "offensive",
+            "defensive",
+            "networking",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 3 for gmu_drone, tagged offensive, reverse_engineering",
+          "tags": [
+            "offensive",
+            "reverse_engineering"
+          ]
+        },
+        {
+          "text": "Example claim 4 for gmu_drone, tagged offensive, vuln, appsec, all",
+          "tags": [
+            "offensive",
+            "vuln",
+            "appsec",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 5 for gmu_drone, tagged offensive, vuln, networking",
+          "tags": [
+            "offensive",
+            "vuln",
+            "networking"
+          ]
+        },
+        {
+          "text": "Example claim 6 for gmu_drone, tagged offensive, vuln, networking",
+          "tags": [
+            "offensive",
+            "vuln",
+            "networking"
+          ]
+        },
+        {
+          "text": "Example claim 7 for gmu_drone, tagged offensive, appsec, programming, all",
+          "tags": [
+            "offensive",
+            "appsec",
+            "programming",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 8 for gmu_drone, tagged defensive, hardening, networking",
+          "tags": [
+            "defensive",
+            "hardening",
+            "networking"
+          ]
+        },
+        {
+          "text": "Example claim 9 for gmu_drone, tagged defensive, hardening, networking",
+          "tags": [
+            "defensive",
+            "hardening",
+            "networking"
+          ]
+        },
+        {
+          "text": "Example claim 10 for gmu_drone, tagged documentation, all",
+          "tags": [
+            "documentation",
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gmu_beholder",
+      "employer": "Example University",
+      "department": "Example Lab",
+      "city": "Your City",
+      "state": "MD",
+      "title": "Research Intern",
+      "focus": "Secure Industrial IoT Telemetry",
+      "start": "06/01/2026",
+      "end": "08/01/2026",
+      "supervisor": "Dr. Example Supervisor",
+      "paid": false,
+      "reason_for_leaving": "College started.",
+      "claims": [
+        {
+          "text": "Example claim 1 for gmu_beholder, tagged embedded, defensive, all",
+          "tags": [
+            "embedded",
+            "defensive",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 2 for gmu_beholder, tagged defensive, detection, monitoring, all",
+          "tags": [
+            "defensive",
+            "detection",
+            "monitoring",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 3 for gmu_beholder, tagged defensive, hardening, crypto",
+          "tags": [
+            "defensive",
+            "hardening",
+            "crypto"
+          ]
+        },
+        {
+          "text": "Example claim 4 for gmu_beholder, tagged defensive, hardening, networking",
+          "tags": [
+            "defensive",
+            "hardening",
+            "networking"
+          ]
+        },
+        {
+          "text": "Example claim 5 for gmu_beholder, tagged embedded, programming, systems, all",
+          "tags": [
+            "embedded",
+            "programming",
+            "systems",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 6 for gmu_beholder, tagged programming, systems, reliability",
+          "tags": [
+            "programming",
+            "systems",
+            "reliability"
+          ]
+        },
+        {
+          "text": "Example claim 7 for gmu_beholder, tagged embedded, cost",
+          "tags": [
+            "embedded",
+            "cost"
+          ]
+        }
+      ],
+      "supervisor_email": "supervisor@example.edu"
+    }
+  ],
+  "projects": [
+    {
+      "id": "receipts",
+      "name": "Receipts",
+      "subtitle": "Local-first macOS application",
+      "dates": "Jun 2026 - Present",
+      "stack": "Swift, SwiftUI, SQLite, Apple Foundation Models",
+      "team_size": 3,
+      "my_scope": "Privacy and security controls, data layer. Did NOT write the Swift UI.",
+      "claims": [
+        {
+          "text": "Example claim 1 for receipts, tagged ai_security, privacy, all",
+          "tags": [
+            "ai_security",
+            "privacy",
+            "all"
+          ]
+        },
+        {
+          "text": "Example claim 2 for receipts, tagged ai_security, appsec, privacy",
+          "tags": [
+            "ai_security",
+            "appsec",
+            "privacy"
+          ]
+        },
+        {
+          "text": "Example claim 3 for receipts, tagged appsec, privacy, programming",
+          "tags": [
+            "appsec",
+            "privacy",
+            "programming"
+          ]
+        },
+        {
+          "text": "Example claim 4 for receipts, tagged reverse_engineering, programming",
+          "tags": [
+            "reverse_engineering",
+            "programming"
+          ]
+        }
+      ]
+    }
+  ],
+  "certifications": [
+    {
+      "name": "ISC2 Certified in Cybersecurity (CC)",
+      "issuer": "ISC2",
+      "credential_id": "EXAMPLE-ID",
+      "issued": "August 2026",
+      "status": "Active"
+    },
+    {
+      "name": "CompTIA IT Fundamentals+ (ITF+)",
+      "issuer": "CompTIA",
+      "credential_id": "EXAMPLE-ID",
+      "issued": "October 2024",
+      "status": "Active"
+    }
+  ],
+  "awards": [
+    {
+      "text": "Example award 1",
+      "tags": [
+        "all"
+      ]
+    },
+    {
+      "text": "Example award 2",
+      "dates": "09/2022 - 06/2023",
+      "tags": [
+        "all",
+        "public_service"
+      ]
+    }
+  ],
+  "extracurriculars": [
+    {
+      "org": "Example Organization",
+      "role": "STEM Mentor",
+      "location": "Remote",
+      "dates": "Sep 2024 - Aug 2026",
+      "paid": true,
+      "supervisor": "redacted",
+      "supervisor_email": "redacted",
+      "supervisor_phone": "redacted",
+      "reason_for_leaving": "College started.",
+      "description": "Example description of this activity.",
+      "tags": [
+        "public_service",
+        "communication",
+        "teaching"
+      ]
+    },
+    {
+      "org": "Example Organization",
+      "role": "Chapter President",
+      "dates": "Jun 2025 - May 2026",
+      "description": "Example description of this activity.",
+      "tags": [
+        "leadership",
+        "communication"
+      ]
+    },
+    {
+      "org": "Example Organization",
+      "role": "Public Relations Deputy",
+      "dates": "Jun 2023 - May 2024",
+      "description": "Example description of this activity.",
+      "tags": [
+        "leadership",
+        "communication",
+        "public_service"
+      ],
+      "org_generic_variant": "Student Union",
+      "_note": "Applications often state you are not required to name organizations that indicate race, ancestry, or ethnic origin. Your choice which variant to use; use the full name by default unless he says otherwise."
+    }
+  ],
+  "skill_pool": [
+    {
+      "skill": "Vulnerability assessment",
+      "tags": [
+        "offensive",
+        "vuln"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Adversary emulation",
+      "tags": [
+        "offensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Reverse engineering",
+      "tags": [
+        "offensive",
+        "reverse_engineering"
+      ],
+      "evidence": "gmu_drone, receipts"
+    },
+    {
+      "skill": "Penetration testing concepts",
+      "tags": [
+        "offensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Security control implementation and validation",
+      "tags": [
+        "defensive",
+        "hardening"
+      ],
+      "evidence": "gmu_drone, gmu_beholder"
+    },
+    {
+      "skill": "Infrastructure hardening",
+      "tags": [
+        "defensive",
+        "hardening"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Security monitoring and baselining",
+      "tags": [
+        "defensive",
+        "detection"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Network security",
+      "tags": [
+        "networking",
+        "offensive",
+        "defensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Application security",
+      "tags": [
+        "appsec"
+      ],
+      "evidence": "gmu_drone, receipts"
+    },
+    {
+      "skill": "Packet analysis",
+      "tags": [
+        "networking",
+        "offensive",
+        "defensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Threat modeling",
+      "tags": [
+        "defensive",
+        "appsec"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "LLM safety and prompt injection defense",
+      "tags": [
+        "ai_security"
+      ],
+      "evidence": "receipts"
+    },
+    {
+      "skill": "PII redaction and data privacy controls",
+      "tags": [
+        "ai_security",
+        "privacy",
+        "grc"
+      ],
+      "evidence": "receipts"
+    },
+    {
+      "skill": "Wireshark",
+      "tags": [
+        "tool",
+        "networking",
+        "offensive",
+        "defensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Nmap",
+      "tags": [
+        "tool",
+        "networking",
+        "offensive"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "mitmproxy",
+      "tags": [
+        "tool",
+        "offensive",
+        "appsec"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "JADX",
+      "tags": [
+        "tool",
+        "reverse_engineering"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "iptables",
+      "tags": [
+        "tool",
+        "defensive",
+        "networking"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "WireGuard",
+      "tags": [
+        "tool",
+        "defensive",
+        "networking"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Python",
+      "tags": [
+        "language",
+        "all"
+      ],
+      "evidence": "gmu_drone, gmu_beholder"
+    },
+    {
+      "skill": "C",
+      "tags": [
+        "language",
+        "embedded",
+        "systems"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Java",
+      "tags": [
+        "language"
+      ],
+      "evidence": "IS 247 coursework"
+    },
+    {
+      "skill": "SQL",
+      "tags": [
+        "language",
+        "data"
+      ],
+      "evidence": "gmu_beholder, receipts"
+    },
+    {
+      "skill": "Bash",
+      "tags": [
+        "language",
+        "systems"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Linux",
+      "tags": [
+        "systems",
+        "all"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "TCP/IP",
+      "tags": [
+        "networking"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "TLS",
+      "tags": [
+        "networking",
+        "crypto"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "MQTT",
+      "tags": [
+        "networking",
+        "embedded"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "HTTP",
+      "tags": [
+        "networking",
+        "appsec"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "SSH",
+      "tags": [
+        "networking",
+        "systems"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Embedded systems",
+      "tags": [
+        "embedded"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "SPI and GPIO",
+      "tags": [
+        "embedded"
+      ],
+      "evidence": "gmu_beholder"
+    },
+    {
+      "skill": "Git",
+      "tags": [
+        "tool",
+        "all"
+      ],
+      "evidence": "general"
+    },
+    {
+      "skill": "Technical documentation and reporting",
+      "tags": [
+        "grc",
+        "communication",
+        "all"
+      ],
+      "evidence": "gmu_drone"
+    },
+    {
+      "skill": "Microsoft Office (Excel, Word, PowerPoint)",
+      "tags": [
+        "business",
+        "grc"
+      ],
+      "evidence": "general"
+    },
+    {
+      "skill": "Communicating technical material to non-technical audiences",
+      "tags": [
+        "communication",
+        "grc"
+      ],
+      "evidence": "Example Organization"
+    }
+  ],
+  "NEVER_CLAIM": [
+    "Ghidra",
+    "SIEM",
+    "DLP",
+    "malware analysis",
+    "digital forensics",
+    "threat intelligence platforms",
+    "Swift",
+    "Grafana",
+    "Prometheus",
+    "PromQL",
+    "IDS/IPS",
+    "AWS",
+    "incident response (hands-on)",
+    "cloud security",
+    "Kubernetes",
+    "Docker"
+  ],
+  "assembly_rules": {
+    "principle": "Select and order existing claims by relevance to the posting. Never write a new claim, never merge two claims into a stronger one, never soften a qualifier. If the posting wants something not in the pool, leave it out rather than stretching.",
+    "resume_bullets": "Pick 3 claims per experience entry, ordered by relevance to the posting. Merge closely related claims into one bullet ONLY when both are true as written and the merge adds no new assertion.",
+    "skills_field": "Filter skill_pool by the posting's tags. Order most-relevant first. Default 10 items; expand if the field allows more. Never include anything from NEVER_CLAIM even if the posting asks for it.",
+    "role_type_tags": {
+      "offensive / red team / RE / vuln research": [
+        "offensive",
+        "vuln",
+        "reverse_engineering",
+        "appsec"
+      ],
+      "blue team / SOC / detection / monitoring": [
+        "defensive",
+        "detection",
+        "monitoring",
+        "networking"
+      ],
+      "AI / LLM security": [
+        "ai_security",
+        "privacy",
+        "appsec"
+      ],
+      "embedded / hardware / systems": [
+        "embedded",
+        "systems",
+        "programming"
+      ],
+      "public interest / federal / nonprofit": [
+        "public_service",
+        "all"
+      ],
+      "GRC / risk / audit / banking": [
+        "vuln",
+        "defensive",
+        "documentation",
+        "privacy",
+        "communication"
+      ]
+    },
+    "lead_with": "The experience entry whose claims best match the posting's primary responsibilities, not always the most recent one.",
+    "no_grc_experience": "You have NO governance, risk, or compliance experience. No NIST/ISO/CIS framework work, no audits, no policy writing, no risk registers, no regulatory remediation. For GRC-flavored roles, lead with vulnerability assessment, implementing and verifying controls, and documentation, and frame compliance frameworks as something to learn. Never imply framework or audit experience.",
+    "merge_pairs": []
+  },
+  "standard_answers": {
+    "how_did_you_hear_about_this_position": "Online job board",
+    "why_did_you_leave_last_position": "College started.",
+    "why_seeking_change_of_employment": "I am a full-time student seeking a summer internship to gain hands-on experience in information security.",
+    "employment_type_sought": "Campus Program (Intern/Co-op)",
+    "days_available": "Monday through Friday",
+    "earliest_start_date": "05/31/2027",
+    "willing_to_relocate": "Yes for summer internships. NOT for school-year on-site roles away from your school.",
+    "previously_employed_here": "No",
+    "interviewed_here_before": "No",
+    "unemployed_last_6_months": "No - full-time student",
+    "3_plus_years_professional_experience": "No",
+    "eeo_questions": "Personal choice. Every EEO question has a decline-to-self-identify option and hiring teams do not see individual answers during review.",
+    "references": [
+      {
+        "name": "Dr. Example Supervisor",
+        "title": "Research Advisor",
+        "org": "Example Lab",
+        "relationship": "Advised both research internships",
+        "email": "supervisor@example.edu"
+      }
+    ]
+  },
+  "compensation_rules": {
+    "if_range_posted": "Answer inside their range. Name a number at or near the top plus flexibility.",
+    "if_no_range_posted": "Say 'Open' or 'Negotiable'. Do NOT guess - $22-28/hr was stated against a $16-19.67 band at Example Company.",
+    "if_optional_and_rate_fixed": "Leave blank.",
+    "if_bracket_dropdown_with_optout": "Use the opt-out bracket, or the bracket containing their posted floor."
+  },
+  "writing_rules": [
+    "No em-dashes anywhere.",
+    "No colons, semicolons, or dashes inside resume role sections.",
+    "Plain language. Complex ideas, simple words.",
+    "No negative parallelisms, overgeneralizing, editorializing, or mechanical topic-sentence openers.",
+    "Never state weaknesses as deficits. Frame unfamiliar tools as things to learn.",
+    "Every claim must be defensible out loud in an interview.",
+    "Honest scoping: 'reduced attack surface' not 'closed off'. 'Proof-of-concept mitigation' not 'fixed'. Server-auth TLS, not mTLS.",
+    "Cover letters: one page, four paragraphs. Draft as text for review BEFORE compiling to PDF."
+  ],
+  "eligibility_filters": {
+    "hard_blockers": [
+      "Graduation window excluding May 2029",
+      "Institution restrictions (e.g. SWVA consortium - blocked VPT)",
+      "Active clearance required at application",
+      "School-year on-site role away from your school"
+    ],
+    "soft_flags": [
+      "'Rising junior or senior preferred' - argue junior standing by credits",
+      "'Penultimate or final year' - qualifies; 2027-28 is penultimate on a three-year path",
+      "'Less than 2 years until graduation' - borderline, ~23 months from a June 2027 start"
+    ],
+    "always_viable": "Summer term any location. Remote any term. Local flexible term-time."
+  },
+  "key_deadlines": [
+    {
+      "item": "NREIP application",
+      "due": "2026-11-30",
+      "note": "11:59pm Central"
+    },
+    {
+      "item": "NREIP reference forms",
+      "due": "2026-12-14",
+      "note": "Ask your advisor NOW"
+    },
+    {
+      "item": "Example Company eCTF registration",
+      "due": "2027-01-31",
+      "note": "Nov 4 for extra dev board. Needs team + faculty advisor."
+    },
+    {
+      "item": "CIA Stokes Scholarship",
+      "due": "mid-Dec 2026 to late Jan 2027",
+      "note": "~6 week window"
+    },
+    {
+      "item": "your school CyberCorps SFS",
+      "due": "~2027-02-15",
+      "note": "contact@example.edu, contact@example.edu"
+    },
+    {
+      "item": "Capital One / Deloitte next cycle",
+      "due": "July-Sept 2027",
+      "note": "Missed 2027 on timing"
+    }
+  ]
+}

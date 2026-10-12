@@ -8,6 +8,27 @@ on inputs, selects and textareas and dispatches `input` and `change`. It
 contains no `.submit()`, no `.requestSubmit()` and no `.click()`, and
 `test/smoke.mjs` greps the source (comments stripped) to keep that true.
 
+## Setup
+
+Your real data is **not** in this repo. Two files are gitignored:
+
+| gitignored, yours | committed example |
+|---|---|
+| `data/profile.json` | `data/profile.example.json` |
+| `tracker/data.json` | `tracker/data.example.json` |
+
+```bash
+cp data/profile.example.json data/profile.json
+cp tracker/data.example.json tracker/data.json
+```
+
+Then put your own details in. The examples are structurally identical: same
+claim ids, same tag sets, same `NEVER_CLAIM`, same `assembly_rules`, same
+`eligibility_filters`, with placeholder values. Everything runs without this
+step, so you can look round first; the popup, the CLI and the tracker each say
+when they are running on placeholder data, and `node test/smoke.mjs` skips the
+two assertions that check real wording.
+
 ## Install
 
 1. `chrome://extensions`, turn on Developer mode

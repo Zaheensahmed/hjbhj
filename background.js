@@ -12,6 +12,7 @@
 // the popup, which only exists because you clicked the toolbar button.
 
 import { getProfile, setProfile, putHarvested, setRun, getTriage } from "./shared/store.js";
+import { fetchProfile } from "./shared/load-data.js";
 import { parsePanel } from "./engine/harvest.js";
 import { parsePosting } from "./engine/posting.js";
 import { checkEligibility } from "./engine/eligibility.js";
@@ -20,15 +21,14 @@ import { harvestSummaryMessage, earlyTerminationMessage } from "./engine/queue.j
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await getProfile();
   if (existing) return; // never clobber edits
-  const res = await fetch(chrome.runtime.getURL("data/profile.json"));
-  await setProfile(await res.json());
+  const { profile } = await fetchProfile();
+  await setProfile(profile);
 });
 
 async function loadProfile() {
   const p = await getProfile();
   if (p) return p;
-  const res = await fetch(chrome.runtime.getURL("data/profile.json"));
-  return res.json();
+  return (await fetchProfile()).profile;
 }
 
 /**

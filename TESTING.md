@@ -30,13 +30,30 @@ run it. That is the honest position, and steps 3 to 10 exist to close it.
 
 ---
 
+## 0. Put your data back in place (1 minute)
+
+Your real `data/profile.json` and `tracker/data.json` are gitignored, so a fresh
+clone has only the redacted examples.
+
+```bash
+cd ~/Documents/GitHub/job-autofill && cp -n data/profile.example.json data/profile.json && cp -n tracker/data.example.json tracker/data.json
+```
+
+On the machine you built this on, both real files are already there and `cp -n`
+will not touch them. **Working:** `node test/smoke.mjs` ends `686 passed`. On
+example data it ends `650 passed, 0 failed, 2 skipped` and prints a note saying
+which file it used.
+
+If you ever see "Running on data/profile.example.json" in the popup, stop before
+filling a real form: it will put "Your Name" into it.
+
 ## 1. The test suite (2 minutes)
 
 ```bash
 cd ~/Documents/GitHub/job-autofill && node test/smoke.mjs
 ```
 
-**Working:** last line reads `574 passed, 0 failed`. Two lines of CLI error text
+**Working:** last line reads `686 passed, 0 failed`. Two lines of CLI error text
 appear partway through; those are deliberate, from the tests that check the CLI
 fails cleanly.
 

@@ -4,6 +4,7 @@
 // separate modules means a break in one cannot take the other down.
 
 import { getProfile, getLearned, getPrefs } from "../shared/store.js";
+import { fetchProfile } from "../shared/load-data.js";
 import { $, setStatus } from "./ui.js";
 import { initPageTab, runPage } from "./tab-page.js";
 import { initPasteTab } from "./tab-paste.js";
@@ -31,10 +32,15 @@ function switchTab(name) {
   chrome.runtime.sendMessage({ type: "badge:clear" }).catch(() => {});
 
   let profile = await getProfile();
+  let usingExample = false;
   if (!profile) {
-    const res = await fetch(chrome.runtime.getURL("data/profile.json"));
-    profile = await res.json();
+    const loaded = await fetchProfile();
+    profile = loaded.profile;
+    usingExample = loaded.isExample;
   }
+  // Placeholder data fills forms with "Your Name" and example claims, which is
+  // worth saying out loud rather than letting you discover it on a real form.
+  usingExample = usingExample || profile.identity.email === "you@example.com";
   const learned = await getLearned();
   const prefs = await getPrefs();
 
@@ -42,10 +48,14 @@ function switchTab(name) {
   initPasteTab(profile);
   initQueueTab();
 
+  if (usingExample) {
+    setStatus("Running on data/profile.example.json. Copy it to data/profile.json and put your own details in before filling any real form.", "red");
+  }
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   if (!tab || !/^https?:/.test(tab.url || "")) {
-    setStatus("This page is not a website the extension can read. The paste tab still works.", "red");
+    if (!usingExample) setStatus("This page is not a website the extension can read. The paste tab still works.", "red");
     switchTab("paste");
     return;
   }

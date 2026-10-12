@@ -24,7 +24,21 @@ import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const profile = JSON.parse(fs.readFileSync(path.join(root, "data/profile.json"), "utf8"));
+
+// The real data files are gitignored. A clean clone has only the .example.json
+// ones, which are structurally identical with placeholder values, so almost
+// everything here runs either way. The few groups that assert real content are
+// skipped and say so.
+function loadData(realPath, examplePath) {
+  const real = path.join(root, realPath);
+  if (fs.existsSync(real)) return { data: JSON.parse(fs.readFileSync(real, "utf8")), isReal: true };
+  return { data: JSON.parse(fs.readFileSync(path.join(root, examplePath), "utf8")), isReal: false };
+}
+const loadedProfile = loadData("data/profile.json", "data/profile.example.json");
+const loadedTracker = loadData("tracker/data.json", "tracker/data.example.json");
+const profile = loadedProfile.data;
+const REAL_PROFILE = loadedProfile.isReal;
+const REAL_TRACKER = loadedTracker.isReal;
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -32,6 +46,8 @@ function ok(name, cond, detail) {
   else { fail++; console.log(`  FAIL ${name}${detail ? "\n       " + detail : ""}`); }
 }
 function group(name) { console.log(`\n${name}`); }
+let skipped = 0;
+function skip(name, why) { skipped++; console.log(`  skip ${name}\n       ${why}`); }
 
 const field = (o) => ({
   jafId: o.jafId || "jaf-x", tag: o.tag || "input", type: o.type || "text",
@@ -83,7 +99,8 @@ group("Verifier rejects what it must");
 
   const cases = [
     ["invented claim", "Led a red team engagement for a Fortune 500 client"],
-    ["softened qualifier", real.replace("Assessed", "Led a full security audit of")],
+    // A content-independent mutation, so this holds for the example profile too.
+    ["softened qualifier", "Led a full security audit after " + real.charAt(0).toLowerCase() + real.slice(1)],
     ["silent merge", profile.experience[0].claims[0].text + " and " + profile.experience[0].claims[1].text],
     ["strengthened wording", "Built a mitmproxy tool that fixed the authentication vulnerability"],
     ["NEVER_CLAIM term", "Performed malware analysis in Ghidra"]
@@ -159,9 +176,13 @@ group("no_grc_experience");
   const text = a.entries.flatMap((e) => e.bullets.map((b) => b.text)).join(" ").toLowerCase();
   ok("no framework token leaks into the bullets",
     !/\bnist\b|\biso 27001\b|\bsoc 2\b|\baudit\b|risk register|policy writing/.test(text));
-  ok("leads with assessment, controls or documentation per the rule",
-    /assess|identified|restricted|documented|implemented|built/.test(a.entries[0].bullets[0].text.toLowerCase()),
-    a.entries[0].bullets[0].text);
+  if (REAL_PROFILE) {
+    ok("leads with assessment, controls or documentation per the rule",
+      /assess|identified|restricted|documented|implemented|built/.test(a.entries[0].bullets[0].text.toLowerCase()),
+      a.entries[0].bullets[0].text);
+  } else {
+    skip("leads with assessment, controls or documentation", "checks the wording of real claim text.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +279,7 @@ group("Matcher");
 
   ok("email fills from autocomplete at confident tier",
     find("f1") && find("f1").value === profile.identity.email && find("f1").tier === "confident");
-  ok("first name fills", find("f2") && find("f2").value === "Casey");
+  ok("first name fills", find("f2") && find("f2").value === profile.identity.first_name);
   ok("a meaningless attribute label stays unknown", Boolean(unknown("f3")));
   ok("phone fills", find("f4") && find("f4").value === profile.identity.phone);
   ok("state select resolves MD to Maryland", find("f5") && find("f5").display === "Maryland");
@@ -669,7 +690,9 @@ group("Feature 2: tracker logic");
 
 // ---------------------------------------------------------------------------
 group("Feature 2: seed data");
-{
+if (!REAL_TRACKER) {
+  skip("the whole seed-data group", "tracker/data.json is not present, so only tracker/data.example.json exists. These assertions check real seeded content.");
+} else {
   const T = globalThis.JAF_TRACKER;
   const TODAY = new Date(Date.UTC(2026, 9, 12));
   const raw = JSON.parse(fs.readFileSync(path.join(root, "tracker/data.json"), "utf8"));
@@ -735,6 +758,37 @@ group("Feature 2: seed data");
 }
 
 // ---------------------------------------------------------------------------
+group("Feature 2: the example data is usable");
+{
+  const T = globalThis.JAF_TRACKER;
+  const ex = T.normalize(JSON.parse(fs.readFileSync(path.join(root, "tracker/data.example.json"), "utf8")));
+  ok("the example tracker normalizes", ex.applications.length > 0 && ex.deadlines.length > 0);
+  ok("the example tracker has no bad dates", !T.validate(ex).some((p) => p.kind === "bad-date"));
+  ok("the example tracker has no duplicate ids", !T.validate(ex).some((p) => p.kind === "duplicate-id"));
+  ok("the example tracker uses known statuses", !T.validate(ex).some((p) => p.kind === "unknown-status"));
+  ok("every example view runs", T.byStatus(ex).length > 0 && Array.isArray(T.stale(ex, new Date())) && T.upcoming(ex, new Date()).length > 0);
+
+  const exProfile = JSON.parse(fs.readFileSync(path.join(root, "data/profile.example.json"), "utf8"));
+  ok("the example profile has the same top-level shape as a real one",
+    JSON.stringify(Object.keys(exProfile)) === JSON.stringify(Object.keys(profile)));
+  ok("the example profile keeps every claim id and tag set",
+    JSON.stringify(exProfile.experience.map((e) => [e.id, e.claims.map((c) => c.tags)])) ===
+    JSON.stringify(profile.experience.map((e) => [e.id, e.claims.map((c) => c.tags)])));
+  ok("the example profile keeps NEVER_CLAIM intact", JSON.stringify(exProfile.NEVER_CLAIM) === JSON.stringify(profile.NEVER_CLAIM));
+  ok("the example profile keeps the role-type tag map", JSON.stringify(exProfile.assembly_rules.role_type_tags) === JSON.stringify(profile.assembly_rules.role_type_tags));
+  ok("the example profile assembles and verifies",
+    assemble(exProfile, parsePosting({ title: "Summer 2027 Red Team Intern", text: "Penetration testing and vulnerability research." })).ok);
+
+  // The point of redacting: no real personal values may survive in a committed file.
+  const blob = fs.readFileSync(path.join(root, "data/profile.example.json"), "utf8") +
+               fs.readFileSync(path.join(root, "tracker/data.example.json"), "utf8");
+  for (const needle of ["Casey", "Example Supervisor", "Example Org", "your campus", "Example Town", "Your City",
+                        "Example Street", "555-0100", "555-0101", "zaheensahmed", "Example Company",
+                        "Example Company", "Example Company", "REQ-00000", "EXAMPLE-ID"]) {
+    ok(`the committed example files do not contain "${needle}"`, !blob.includes(needle));
+  }
+}
+
 group("Feature 2: tracker stays local");
 {
   const stripComments = (src) =>
@@ -748,16 +802,24 @@ group("Feature 2: tracker stays local");
     !/^\s*(import|export)\s/m.test(logic));
 
   const ui = stripComments(fs.readFileSync(path.join(root, "tracker/tracker.js"), "utf8"));
-  const fetches = [...ui.matchAll(/fetch\s*\(\s*["'`]([^"'`]*)/g)].map((m) => m[1]);
-  ok("the tracker only ever fetches its own data file",
-    fetches.length === 1 && fetches[0] === "data.json",
-    JSON.stringify(fetches));
+  // The tracker loops over a candidate list, so check the list itself rather
+  // than the call site.
+  const candidates = (ui.match(/for \(const path of \[([^\]]+)\]\)/) || [])[1] || "";
+  const paths = [...candidates.matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+  ok("the tracker only ever fetches its own two bundled data files",
+    JSON.stringify(paths) === '["data.json","data.example.json"]', JSON.stringify(paths));
+  ok("the tracker fetches no absolute URL", !/fetch\s*\(\s*["'`]?https?:/i.test(ui));
   ok("the tracker does not use chrome.scripting", !/chrome\.scripting/.test(ui));
 
   const html = fs.readFileSync(path.join(root, "tracker/index.html"), "utf8");
   ok("the tracker page loads no remote script or style",
     ![...html.matchAll(/(?:src|href)="([^"]+)"/g)].some((m) => /^(https?:)?\/\//.test(m[1])));
   ok("the tracker page says it cannot write to disk", /cannot write to your disk/i.test(html));
+  const ignore = fs.readFileSync(path.join(root, ".gitignore"), "utf8");
+  ok("data/profile.json is gitignored", /^data\/profile\.json$/m.test(ignore));
+  ok("tracker/data.json is gitignored", /^tracker\/data\.json$/m.test(ignore));
+  ok("the example files are NOT ignored", !/profile\.example\.json/.test(ignore) && !/data\.example\.json/.test(ignore));
+
   ok("the tracker page offers all four views",
     ["status", "stale", "deadlines", "problems"].every((v) => html.includes(`data-view="${v}"`)));
 }
@@ -1403,17 +1465,25 @@ group("Feature 5: packaging");
     }
   };
   walk("");
-  const offenders = [];
+  // No fetch anywhere may name a remote host, whether as a literal, a template
+  // or a variable holding one.
+  const remote = [];
+  const literalPaths = [];
   for (const f of files) {
     const src = fs.readFileSync(path.join(root, f), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
-    for (const m of src.matchAll(/fetch\s*\(\s*([^)]{0,80})/g)) {
-      const arg = m[1];
-      const local = /chrome\.runtime\.getURL|["'`](?:\.\/)?(?:data|tracker)\/|["'`]data\.json["'`]/.test(arg);
-      if (!local) offenders.push(`${f}: fetch(${arg.slice(0, 50)})`);
+    if (/fetch\s*\(\s*[`"']?\s*(?:https?:)?\/\//i.test(src)) remote.push(`${f}: fetch to an absolute URL`);
+    for (const m of src.matchAll(/["'`]((?:https?:)?\/\/[^"'`\s]+)["'`]/g)) {
+      if (!/schema|w3\.org|json-schema/i.test(m[1])) remote.push(`${f}: URL literal ${m[1]}`);
     }
+    for (const m of src.matchAll(/fetch\s*\(\s*["'`]([^"'`]+)["'`]/g)) literalPaths.push(`${f}:${m[1]}`);
   }
-  ok("every fetch in the extension targets a bundled file", offenders.length === 0, offenders.join(" | "));
+  ok("no file in the extension names a remote URL", remote.length === 0, remote.join(" | "));
+  ok("every literal fetch path is a bundled relative path",
+    literalPaths.every((p) => !/^https?:/.test(p.split(":").slice(1).join(":"))), literalPaths.join(" | "));
+  ok("the profile loader names only the two bundled profile paths",
+    /PROFILE_PATH = "data\/profile\.json"/.test(fs.readFileSync(path.join(root, "shared/load-data.js"), "utf8")) &&
+    /PROFILE_EXAMPLE_PATH = "data\/profile\.example\.json"/.test(fs.readFileSync(path.join(root, "shared/load-data.js"), "utf8")));
   ok("nothing opens a socket", !files.some((f) => /WebSocket|EventSource/.test(fs.readFileSync(path.join(root, f), "utf8"))));
 }
 
@@ -1650,5 +1720,7 @@ group("Silent failure fix: the UI cannot reintroduce the fallback");
   ok("the triage tab states that REVIEW means not yet assessed", /REVIEW means not yet assessed/i.test(t));
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);
+if (!REAL_PROFILE) console.log("note: ran against data/profile.example.json, so content-specific checks used placeholder values.");
+if (!REAL_TRACKER) console.log("note: ran against tracker/data.example.json.");
 process.exit(fail ? 1 : 0);

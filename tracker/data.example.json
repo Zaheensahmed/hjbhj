@@ -1,0 +1,90 @@
+{
+  "_README": "EXAMPLE FILE. Copy to tracker/data.json and replace with your own. Dates are YYYY-MM-DD; anything else is reported as a bad date rather than guessed. Blank means not known yet, never a placeholder. status_assumed:true marks a status inferred rather than stated.",
+  "_last_updated": "2026-10-12",
+  "statuses": [
+    "To apply",
+    "Applied",
+    "Under Review",
+    "Under Consideration",
+    "Interview",
+    "Offer",
+    "Rejected",
+    "Closed"
+  ],
+  "applications": [
+    {
+      "id": "example-under-review",
+      "company": "Example Corp",
+      "term": "Summer 2027",
+      "status": "Under Review",
+      "date_applied": "2026-09-03",
+      "notes": "Applied with a referral."
+    },
+    {
+      "id": "example-applied",
+      "company": "Another Example Inc",
+      "term": "Summer 2027",
+      "status": "Applied",
+      "status_assumed": true
+    },
+    {
+      "id": "example-rejected",
+      "company": "Third Example LLC",
+      "term": "Summer 2027",
+      "status": "Rejected",
+      "date_closed": "2026-10-08"
+    },
+    {
+      "id": "example-to-apply",
+      "company": "Fourth Example Co",
+      "role": "Security Intern",
+      "location": "Your City, MD",
+      "term": "Summer 2027",
+      "status": "To apply",
+      "next_action": "Apply."
+    }
+  ],
+  "deadlines": [
+    {
+      "id": "nreip-application",
+      "item": "NREIP application",
+      "due": "2026-11-30",
+      "note": "11:59pm Central."
+    },
+    {
+      "id": "nreip-references",
+      "item": "NREIP reference forms",
+      "due": "2026-12-14",
+      "note": "Ask your advisor now. He advised both research internships and is the only reference on file."
+    },
+    {
+      "id": "mitre-ectf",
+      "item": "Example Company eCTF registration",
+      "due": "2027-01-31",
+      "note": "November 4 for the extra dev board. Needs a team and a faculty advisor."
+    },
+    {
+      "id": "cia-stokes",
+      "item": "CIA Stokes Scholarship",
+      "due": "2026-12-15",
+      "due_text": "mid-December 2026 to late January 2027",
+      "due_approx": true,
+      "note": "Roughly a six week window. The due date here is the start of the window, for sorting."
+    },
+    {
+      "id": "your campus-cybercorps-sfs",
+      "item": "University CyberCorps SFS",
+      "due": "2027-02-15",
+      "due_approx": true,
+      "note": "Approximate. Contacts: contact@example.edu, contact@example.edu"
+    },
+    {
+      "id": "capital-one-deloitte",
+      "item": "Capital One and Deloitte next cycle",
+      "due": "2027-07-01",
+      "due_text": "July to September 2027",
+      "due_approx": true,
+      "note": "Missed the 2027 cycle on timing. The due date here is the start of the window, for sorting."
+    }
+  ]
+}

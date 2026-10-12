@@ -17,10 +17,14 @@
 
   // ------------------------------------------------------------------ loading
 
+  // data.json holds your real tracker and is gitignored. A clean clone has only
+  // data.example.json, which has the same shape with example rows.
   async function loadSeed() {
-    const res = await fetch("data.json", { cache: "no-store" });
-    if (!res.ok) throw new Error(`data.json responded ${res.status}`);
-    return res.json();
+    for (const path of ["data.json", "data.example.json"]) {
+      const res = await fetch(path, { cache: "no-store" });
+      if (res.ok) return { data: await res.json(), source: path };
+    }
+    throw new Error("neither data.json nor data.example.json could be read");
   }
 
   async function loadOverlay() {
@@ -31,8 +35,11 @@
 
   async function boot() {
     let seed = null;
+    let seedSource = null;
     try {
-      seed = await loadSeed();
+      const loaded = await loadSeed();
+      seed = loaded.data;
+      seedSource = loaded.source;
     } catch (err) {
       $("load").hidden = false;
       $("load-why").textContent = String(err && err.message ? err.message : err);
@@ -43,7 +50,13 @@
     }
 
     const overlay = await loadOverlay().catch(() => null);
-    if (seed) adopt(seed, overlay);
+    if (seed) {
+      adopt(seed, overlay);
+      if (seedSource === "data.example.json") {
+        $("overlay-note").hidden = false;
+        $("overlay-note").innerHTML = "Showing <code>data.example.json</code>, the example rows. Copy it to <code>tracker/data.json</code> and put your own applications in.";
+      }
+    }
 
     $("load-file").onchange = async (ev) => {
       const file = ev.target.files && ev.target.files[0];
