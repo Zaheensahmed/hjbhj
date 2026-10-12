@@ -14,6 +14,7 @@
   <nav class="tabs" id="tabs">
     <button data-tab="page" class="active">This page</button>
     <button data-tab="paste">Paste a posting</button>
+    <button data-tab="triage">Triage</button>
   </nav>
 
   <div id="status" class="status">Scanning the page.</div>
@@ -96,6 +97,16 @@
       <button id="paste-copy-all">Copy the whole report</button>
     </div>
     <div id="paste-out"></div>
+  </div>
+
+  <!-- ----------------------------------------------------- triage tab -->
+  <div class="panel" id="panel-triage" hidden>
+    <div class="row">
+      <button id="tri-scan" class="primary">Scan this board</button>
+      <label class="check"><input type="checkbox" id="tri-show-dismissed"> show dismissed</label>
+    </div>
+    <p class="note" id="tri-status">Open a Jobright board and scan it.</p>
+    <div id="tri-out"></div>
   </div>
 
   <footer>

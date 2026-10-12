@@ -1,6 +1,6 @@
 // Thin chrome.storage.local wrapper. No network, ever.
 
-const K = { PROFILE: "profile", LEARNED: "learned", PREFS: "prefs" };
+const K = { PROFILE: "profile", LEARNED: "learned", PREFS: "prefs", TRIAGE: "triage" };
 
 async function get(key, fallback) {
   const o = await chrome.storage.local.get(key);
@@ -59,3 +59,45 @@ export async function forgetAnswer(key) {
   delete learned[key];
   await chrome.storage.local.set({ [K.LEARNED]: learned });
 }
+
+// -------------------------------------------------------------------- triage
+//
+// Keyed by listing URL throughout, so a dismissal survives a rescan, a board
+// reorder and a browser restart.
+
+const EMPTY_TRIAGE = { dismissed: {}, shortlist: {}, harvested: {}, run: null };
+
+export async function getTriage() {
+  const t = await get(K.TRIAGE, null);
+  return { ...EMPTY_TRIAGE, ...(t || {}) };
+}
+
+async function mutateTriage(fn) {
+  const t = await getTriage();
+  fn(t);
+  await chrome.storage.local.set({ [K.TRIAGE]: t });
+  return t;
+}
+
+export const dismissCard = (url, reason) =>
+  mutateTriage((t) => { t.dismissed[url] = { at: new Date().toISOString(), reason: reason || "" }; });
+
+export const restoreCard = (url) =>
+  mutateTriage((t) => { delete t.dismissed[url]; });
+
+export const setShortlisted = (url, record, on) =>
+  mutateTriage((t) => {
+    if (on) t.shortlist[url] = { ...record, at: new Date().toISOString(), queueStatus: (t.shortlist[url] || {}).queueStatus || "queued" };
+    else delete t.shortlist[url];
+  });
+
+export const setQueueStatus = (url, status) =>
+  mutateTriage((t) => { if (t.shortlist[url]) t.shortlist[url].queueStatus = status; });
+
+/** Stage 2 writes one record at a time, so a partial run is still useful. */
+export const putHarvested = (url, record) =>
+  mutateTriage((t) => { t.harvested[url] = { ...(t.harvested[url] || {}), ...record, at: new Date().toISOString() }; });
+
+export const setRun = (run) => mutateTriage((t) => { t.run = run; });
+
+export const clearTriage = () => chrome.storage.local.set({ [K.TRIAGE]: { ...EMPTY_TRIAGE } });

@@ -7,6 +7,7 @@ import { getProfile, getLearned, getPrefs } from "../shared/store.js";
 import { $, setStatus } from "./ui.js";
 import { initPageTab, runPage } from "./tab-page.js";
 import { initPasteTab } from "./tab-paste.js";
+import { initTriageTab, runTriage, isJobright } from "./tab-triage.js";
 
 function switchTab(name) {
   for (const btn of $("tabs").querySelectorAll("button")) {
@@ -39,6 +40,21 @@ function switchTab(name) {
   if (!tab || !/^https?:/.test(tab.url || "")) {
     setStatus("This page is not a website the extension can read. The paste tab still works.", "red");
     switchTab("paste");
+    return;
+  }
+
+  initTriageTab({ tabId: tab.id });
+
+  // A Jobright board has no application form on it, so scanning it as one would
+  // only produce noise. Go straight to triage instead.
+  if (isJobright(tab.url)) {
+    switchTab("triage");
+    setStatus("Jobright board detected.", null);
+    try {
+      await runTriage();
+    } catch (err) {
+      $("tri-status").textContent = `Triage failed: ${err && err.message ? err.message : err}`;
+    }
     return;
   }
 

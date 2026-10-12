@@ -259,6 +259,48 @@ Requirements the posting names that match nothing in the pools are reported as
 gaps, not stretched into claims. For an offensive posting mentioning Ghidra and
 AWS the popup says "asked for, not claimed: ghidra, aws".
 
+## Jobright triage, stage 1
+
+Open a Jobright board and the popup switches to the **Triage** tab and scans it.
+A board has no application form on it, so scanning it as one would only produce
+noise.
+
+Cards carry rich structured data and no job description text. Stage 1 reads the
+structured fields only: title, company, location, arrangement, job type, pay,
+start term, applicant count, posted or reposted date, early-applicant badge,
+alumni count, match percent and label, match-panel tags, and which apply button
+is present.
+
+| verdict | when |
+|---------|------|
+| SKIP | start term is not summer. Winter and spring are term-time and conflict with full-time enrollment at your campus. |
+| SKIP | onsite **and** term-time **and** not commutable from your campus. A summer onsite role far away is not skipped, because summer relocation is fine. |
+| FLAG | Security Clearance tag. You hold none, you are eligible, and only stage 2 can read whether it is required at application. |
+| BOOST | U.S. Citizen Only. You qualify and it thins the pool. |
+| BOOST | low applicant count or an early-applicant badge. |
+| BOOST | alumni from your school, surfaced as a referral lead. |
+| REVIEW | **the ceiling.** Stage 1 cannot say apply. |
+
+There is no APPLY verdict in `engine/triage.js`. `VERDICTS` has two members, the
+string never appears in the file, and the suite runs all 3,600 combinations of
+the fields that feed a verdict to confirm nothing else can come out.
+
+Ranked table with every reason spelled out, a checkbox to shortlist, and a
+dismiss button persisted by listing URL so dismissed cards do not resurface
+across rescans, board reorders or restarts.
+
+### Extraction is unverified against the real site
+
+The patterns in `rules/jobright-rules.js` were written without access to a live
+Jobright page. They read card **text** rather than class names, which survives a
+CSS refactor, but they have not met the real markup.
+
+Every card keeps a raw-text sample with a **Raw text** button, every unreadable
+field is named in the row, and the tab says which strategy found the cards. When
+the known selectors miss and the text heuristic takes over, it says so. The fix
+loop is: copy the raw text, correct the pattern in `rules/jobright-rules.js`,
+rescan.
+
 ## Eligibility
 
 Runs before anything is assembled. A hard blocker stops assembly entirely and

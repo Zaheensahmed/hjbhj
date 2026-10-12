@@ -15,6 +15,8 @@ import { checkEligibility } from "../engine/eligibility.js";
 import { matchFields } from "../engine/matcher.js";
 import { normLabel } from "../engine/normalize.js";
 import { buildReport, reportToText, sectionText, SECTIONS, SECTION_TITLES } from "../engine/report.js";
+import { triageCard, triageAll, VERDICTS } from "../engine/triage.js";
+import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -754,6 +756,194 @@ group("Feature 2: tracker stays local");
   ok("the tracker page says it cannot write to disk", /cannot write to your disk/i.test(html));
   ok("the tracker page offers all four views",
     ["status", "stale", "deadlines", "problems"].every((v) => html.includes(`data-view="${v}"`)));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Feature 3: stage-1 verdicts");
+{
+  const term = (season, year = 2027) => ({ season, year, label: `${year} ${season[0].toUpperCase() + season.slice(1)}` });
+  const card = (o = {}) => ({
+    cardId: "c1", index: 1, listingUrl: o.listingUrl === undefined ? "https://jobright.ai/jobs/info/abc" : o.listingUrl,
+    title: "Security Intern", company: "Acme", location: null, arrangement: null, jobType: "Internship",
+    pay: null, startTerm: null, applicants: null, posted: null, earlyApplicant: false, alumni: null,
+    matchPercent: null, matchLabel: null, tags: [], applyButtons: [], industry: null, rawText: "",
+    ...o
+  });
+  const codes = (r, kind) => r.reasons.filter((x) => x.kind === kind).map((x) => x.code);
+
+  ok("there are exactly two verdicts and apply is not one", JSON.stringify(VERDICTS) === '["REVIEW","SKIP"]');
+
+  // SKIP: start term is not summer.
+  for (const season of ["winter", "spring", "fall"]) {
+    const r = triageCard(card({ startTerm: term(season) }));
+    ok(`a ${season} start term skips`, r.verdict === "SKIP" && codes(r, "skip").includes("term_not_summer"));
+  }
+  ok("the skip reason explains the enrollment conflict",
+    /term-time and conflict with full-time enrollment/i.test(triageCard(card({ startTerm: term("winter") })).reasons.find((x) => x.code === "term_not_summer").text));
+  ok("a summer start term does not skip", triageCard(card({ startTerm: term("summer") })).verdict === "REVIEW");
+
+  // SKIP: onsite and term-time and far.
+  const farTermTime = triageCard(card({ startTerm: term("fall"), arrangement: "Onsite", location: "Seattle, WA" }));
+  ok("onsite plus term-time plus far skips", farTermTime.verdict === "SKIP" && codes(farTermTime, "skip").includes("onsite_termtime_far"));
+  ok("that skip cites the eligibility filter", /school-year on-site role away from your campus/i.test(farTermTime.reasons.find((x) => x.code === "onsite_termtime_far").text));
+
+  const farSummer = triageCard(card({ startTerm: term("summer"), arrangement: "Onsite", location: "Seattle, WA" }));
+  ok("onsite and far but in summer does NOT skip, because summer relocation is fine",
+    farSummer.verdict === "REVIEW", JSON.stringify(codes(farSummer, "skip")));
+
+  const nearTermTime = triageCard(card({ startTerm: term("fall"), arrangement: "Onsite", location: "Your City, MD" }));
+  ok("onsite term-time but local is not skipped for distance",
+    !codes(nearTermTime, "skip").includes("onsite_termtime_far"));
+
+  const remoteFall = triageCard(card({ startTerm: term("fall"), arrangement: "Remote", location: "Seattle, WA" }));
+  ok("remote is never skipped for distance", !codes(remoteFall, "skip").includes("onsite_termtime_far"));
+  ok("remote is noted as always viable", codes(remoteFall, "note").includes("remote"));
+
+  // FLAG: clearance.
+  const clr = triageCard(card({ startTerm: term("summer"), tags: ["Security Clearance"] }));
+  ok("a clearance tag flags rather than skips", clr.verdict === "REVIEW" && clr.flags.some((f) => f.code === "clearance"));
+  ok("the clearance flag says stage 2 must read the requirement", /required at application/i.test(clr.flags[0].text));
+  ok("a clearance flag lowers the score", clr.score < triageCard(card({ startTerm: term("summer") })).score);
+
+  // BOOST cases.
+  const cit = triageCard(card({ startTerm: term("summer"), tags: ["U.S. Citizen Only"] }));
+  ok("citizen-only boosts", cit.boosts.some((b) => b.code === "citizen_only") && cit.score > 0);
+  ok("the US-spelling variant also boosts", triageCard(card({ startTerm: term("summer"), tags: ["US Citizen Only"] })).boosts.some((b) => b.code === "citizen_only"));
+  ok("early applicant boosts", triageCard(card({ startTerm: term("summer"), earlyApplicant: true })).boosts.some((b) => b.code === "early_applicant"));
+  ok("a small applicant pool boosts", triageCard(card({ startTerm: term("summer"), applicants: 9 })).boosts.some((b) => b.code === "low_applicants"));
+  ok("a large applicant pool does not boost", !triageCard(card({ startTerm: term("summer"), applicants: 400 })).boosts.some((b) => b.code === "low_applicants"));
+  ok("the threshold boundary is inclusive",
+    triageCard(card({ startTerm: term("summer"), applicants: JR.LOW_APPLICANT_THRESHOLD })).boosts.some((b) => b.code === "low_applicants") &&
+    !triageCard(card({ startTerm: term("summer"), applicants: JR.LOW_APPLICANT_THRESHOLD + 1 })).boosts.some((b) => b.code === "low_applicants"));
+
+  const alum = triageCard(card({ startTerm: term("summer"), alumni: 3 }));
+  ok("alumni count boosts", alum.boosts.some((b) => b.code === "alumni"));
+  ok("alumni surface as a referral lead", alum.referralLead && alum.referralLead.kind === "school" && alum.referralLead.count === 3);
+  ok("zero alumni is not a referral lead", triageCard(card({ startTerm: term("summer"), alumni: 0 })).referralLead === null);
+
+  // Missing data is noted, never guessed.
+  const noTerm = triageCard(card({}));
+  ok("a missing start term does not skip", noTerm.verdict === "REVIEW");
+  ok("a missing start term is noted", codes(noTerm, "note").includes("term_unknown"));
+  ok("unreadable fields are listed", noTerm.missing.includes("startTerm") && noTerm.missing.includes("location"));
+  ok("unreadable fields point at the rules file",
+    /rules\/jobright-rules\.js/.test(noTerm.reasons.find((x) => x.code === "fields_missing").text));
+
+  // REVIEW is always labelled as a ceiling, never as a recommendation.
+  const best = triageCard(card({ startTerm: term("summer"), tags: ["U.S. Citizen Only"], alumni: 5, earlyApplicant: true, applicants: 2, matchPercent: 97 }));
+  ok("even the best card is only REVIEW", best.verdict === "REVIEW");
+  ok("REVIEW explains that stage 1 cannot check the prose",
+    /no job description text/i.test(best.reasons.find((x) => x.kind === "verdict").text));
+  ok("REVIEW says it is the ceiling", /best verdict stage 1 can give/i.test(best.reasons.find((x) => x.kind === "verdict").text));
+
+  // Exhaustive: nothing produces anything outside VERDICTS, and never APPLY.
+  let combos = 0;
+  for (const season of [null, "summer", "fall", "winter", "spring"]) {
+    for (const arrangement of [null, "Remote", "Hybrid", "Onsite"]) {
+      for (const location of [null, "Your City, MD", "Seattle, WA", "Arlington, VA", "Remote"]) {
+        for (const tags of [[], ["Security Clearance"], ["U.S. Citizen Only"], ["Security Clearance", "U.S. Citizen Only"]]) {
+          for (const alumni of [null, 0, 7]) {
+            for (const applicants of [null, 1, 500]) {
+              const r = triageCard(card({
+                startTerm: season ? term(season) : null, arrangement, location, tags, alumni, applicants,
+                earlyApplicant: combos % 3 === 0, matchPercent: combos % 101
+              }));
+              combos++;
+              if (!VERDICTS.includes(r.verdict)) { ok("verdict outside the allowed set", false, JSON.stringify(r.verdict)); break; }
+              if (/apply/i.test(r.verdict)) { ok("a verdict said apply", false, r.verdict); break; }
+            }
+          }
+        }
+      }
+    }
+  }
+  // 5 seasons x 4 arrangements x 5 locations x 4 tag sets x 3 alumni x 3 applicants
+  ok(`all ${combos} field combinations stay inside the two verdicts`, combos === 3600, String(combos));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 3: ranking and persistence");
+{
+  const term = (season) => ({ season, year: 2027, label: `2027 ${season}` });
+  const mk = (id, o) => ({
+    cardId: id, index: 1, listingUrl: `https://jobright.ai/jobs/info/${id}`,
+    title: `T${id}`, company: `C${id}`, location: "Your City, MD", arrangement: "Hybrid",
+    jobType: "Internship", pay: null, startTerm: term("summer"), applicants: null, posted: null,
+    earlyApplicant: false, alumni: null, matchPercent: null, matchLabel: null, tags: [],
+    applyButtons: [], industry: null, rawText: "raw", ...o
+  });
+
+  const cards = [
+    mk("plain", {}),
+    mk("winter", { startTerm: term("winter") }),
+    mk("strong", { alumni: 4, tags: ["U.S. Citizen Only"], earlyApplicant: true, applicants: 3 }),
+    mk("flagged", { tags: ["Security Clearance"] })
+  ];
+
+  const { rows, counts } = triageAll(cards, {});
+  ok("REVIEW rows come before SKIP rows", rows[rows.length - 1].card.cardId === "winter");
+  ok("the strongest card ranks first", rows[0].card.cardId === "strong", rows.map((r) => r.card.cardId).join(","));
+  ok("a flagged card ranks below a plain one", rows.findIndex((r) => r.card.cardId === "flagged") > rows.findIndex((r) => r.card.cardId === "plain"));
+  ok("counts add up", counts.total === 4 && counts.review === 3 && counts.skip === 1);
+  ok("flagged and referral counts are reported", counts.flagged === 1 && counts.referralLeads === 1);
+
+  const dismissed = { dismissed: { "https://jobright.ai/jobs/info/winter": { at: "now" } } };
+  const after = triageAll(cards, dismissed);
+  ok("a dismissed listing URL does not come back", !after.rows.some((r) => r.card.cardId === "winter"));
+  ok("dismissals are counted", after.counts.dismissed === 1 && after.counts.shown === 3);
+  ok("dismissal is keyed by listing URL, so a reordered board still hides it",
+    triageAll([...cards].reverse(), dismissed).rows.every((r) => r.card.cardId !== "winter"));
+
+  const shortlisted = triageAll(cards, { shortlist: { "https://jobright.ai/jobs/info/strong": { at: "now" } } });
+  ok("a shortlisted row is marked", shortlisted.rows.find((r) => r.card.cardId === "strong").shortlisted === true);
+  ok("an unshortlisted row is not", shortlisted.rows.find((r) => r.card.cardId === "plain").shortlisted === false);
+
+  // A card with no listing URL cannot be keyed, and must not crash triage.
+  const anon = triageAll([mk("anon", { listingUrl: null })], dismissed);
+  ok("a card with no listing URL still triages", anon.rows.length === 1);
+  ok("it reports the missing URL", anon.rows[0].missing.includes("listingUrl"));
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 3: rules and scanner hygiene");
+{
+  const plain = JR.toPlain();
+  const json = JSON.stringify(plain);
+  ok("toPlain survives JSON", JSON.parse(json).FIELD_PATTERNS.startTerm.length === JR.FIELD_PATTERNS.startTerm.length);
+  ok("no pattern collapses to an empty object", !/:\{\}/.test(json) && !/\[\{\}\]/.test(json));
+  ok("every pattern keeps source and flags",
+    JSON.parse(json).FIELD_PATTERNS.startTerm.every((p) => typeof p.source === "string" && typeof p.flags === "string"));
+  ok("rebuilt patterns still match real card text",
+    new RegExp(JSON.parse(json).FIELD_PATTERNS.startTerm[0].source, "i").test("Start in 2027 Summer"));
+
+  ok("NEAR_your campus covers Baltimore and the DC area",
+    ["Your City, MD", "Arlington, VA", "Washington, DC", "Fort Meade, MD"].every((l) => JR.NEAR_your campus.some((re) => re.test(l))));
+  ok("NEAR_your campus excludes the far cases",
+    ["Seattle, WA", "Austin, TX", "New York, NY", "San Jose, CA"].every((l) => !JR.NEAR_your campus.some((re) => re.test(l))));
+  ok("summer is the only non-term-time season",
+    JR.SUMMER_TERMS.length === 1 && JR.TERM_TIME_TERMS.length === 4 && !JR.TERM_TIME_TERMS.includes("summer"));
+
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const scanSrc = stripComments(fs.readFileSync(path.join(root, "content/jobright-scan.js"), "utf8"));
+
+  ok("the board scanner clicks nothing", !/\.click\s*\(/.test(scanSrc));
+  ok("the board scanner submits nothing", !/\.submit\s*\(|requestSubmit/.test(scanSrc));
+  ok("the board scanner makes no network request", !/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(scanSrc));
+  ok("the board scanner does not use the Find Any Email box", !/find\s*any\s*email/i.test(scanSrc));
+  ok("the board scanner only records which apply button exists",
+    /applyButtons/.test(scanSrc) && !/\.click/.test(scanSrc));
+
+  const triageSrc = stripComments(fs.readFileSync(path.join(root, "engine/triage.js"), "utf8"));
+  ok("engine/triage.js never assigns an APPLY verdict", !/verdict\s*=\s*["'`]APPLY/i.test(triageSrc));
+  ok("the string APPLY appears nowhere in triage code", !/\bAPPLY\b/.test(triageSrc));
+
+  const triTab = stripComments(fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8"));
+  ok("the triage tab clicks nothing on the page", !/"click"|'click'|\.click\s*\(/.test(triTab));
+  ok("the triage tab calls only scanBoard and focusCard",
+    [...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].every((m) => ["scanBoard", "focusCard"].includes(m[1])),
+    JSON.stringify([...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].map((m) => m[1])));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -98,3 +98,20 @@ table.scores { margin-top: 6px; font-size: 11px; color: var(--muted); border-col
 table.scores td { padding: 0 6px 0 0; }
 table.scores td:first-child { text-align: right; font-variant-numeric: tabular-nums; }
 .merge { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* ---------------------------------------------------------------- triage */
+table.triage { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.triage th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); border-bottom: 1px solid var(--line); padding: 3px 4px 3px 0; }
+table.triage td { border-bottom: 1px solid var(--line); padding: 6px 4px 6px 0; vertical-align: top; }
+table.triage tr.skip td { opacity: .55; }
+.verdict { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .05em; padding: 1px 4px; border-radius: 3px; }
+.v-review { background: color-mix(in srgb, var(--blue) 20%, transparent); color: var(--blue); }
+.v-skip { background: var(--chip); color: var(--muted); }
+.sub { color: var(--muted); font-size: 11px; }
+.blank { color: var(--amber); font-size: 11px; }
+ul.reasons { margin: 4px 0 2px; padding-left: 14px; }
+ul.reasons li { font-size: 11px; margin-bottom: 2px; color: var(--muted); }
+ul.reasons li.r-skip { color: var(--red); }
+ul.reasons li.r-flag { color: var(--amber); }
+ul.reasons li.r-boost { color: var(--green); }
+.referral { font-size: 11px; color: var(--green); font-weight: 600; margin: 3px 0; }
