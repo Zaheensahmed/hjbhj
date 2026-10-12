@@ -141,3 +141,17 @@ table.steps-table td { padding: 1px 6px 1px 0; color: var(--muted); }
 table.steps-table td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); width: 36px; }
 table.steps-table tr.bad td { color: var(--red); }
 table.steps-table tr.bad td:nth-child(2) { font-weight: 700; }
+
+/* ------------------------------------------------------------ diagnostics */
+button.danger { border-color: var(--red); color: var(--red); }
+button.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+#tri-dump-text {
+  max-height: 260px; overflow: auto; background: var(--chip); border: 1px solid var(--line);
+  border-radius: 5px; padding: 7px; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; line-height: 1.4; white-space: pre; margin: 6px 0 0;
+}
+/* Held-back rows must not read as queue rows. */
+.held-wrap { border: 1px dashed var(--amber); border-radius: 7px; padding: 8px 10px; margin-top: 14px; background: color-mix(in srgb, var(--amber) 6%, transparent); }
+.held-wrap .card { opacity: .9; }
+.held-head { font-size: 12px; font-weight: 700; color: var(--amber); text-transform: uppercase; letter-spacing: .04em; }
+.not-queue { font-size: 11px; color: var(--amber); margin: 2px 0 8px; }

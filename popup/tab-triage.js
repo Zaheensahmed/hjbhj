@@ -4,8 +4,8 @@
 // and ranks. Stage 1 has no job description text, so the best verdict available
 // is REVIEW. Nothing here clicks anything on the page except a scroll-into-view.
 
-import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, getHarvestProgress, getPrefs, setPrefs } from "../shared/store.js";
-import { toPlain, HARVEST } from "../rules/jobright-rules.js";
+import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, getHarvestProgress, getPrefs, setPrefs, resetBoard } from "../shared/store.js";
+import { toPlain, HARVEST, ORIGINAL_POST_PATTERNS } from "../rules/jobright-rules.js";
 import { triageAll } from "../engine/triage.js";
 import { boardReport } from "../engine/assess.js";
 import { $, esc, show, wireCopyText, flash } from "./ui.js";
@@ -28,6 +28,13 @@ export function initTriageTab({ tabId }) {
     render();
   };
   $("tri-queue-apply").onclick = async () => { await syncAutoQueue(true); render(); };
+  $("tri-dump").onclick = () => runDump();
+  $("tri-dump-close").onclick = () => { $("tri-dump-out").hidden = true; };
+  $("tri-dump-copy").onclick = async () => {
+    await navigator.clipboard.writeText($("tri-dump-text").textContent);
+    flash($("tri-dump-copy"), "Copied");
+  };
+  $("tri-reset").onclick = () => resetThisBoard();
   pollProgress();
 }
 
@@ -105,6 +112,73 @@ function buildReport() {
   });
 }
 
+// --------------------------------------------------------- diagnostics
+
+/**
+ * Opens one card and reports what the "Original Job Post" control actually is.
+ * A diagnostic only: it changes no extraction logic and clicks nothing but the
+ * card and the panel's close control.
+ */
+async function runDump() {
+  if (!state.result || !state.result.rows.length) {
+    $("tri-status").textContent = "Scan the board first, so there is a card to open.";
+    return;
+  }
+  $("tri-dump-out").hidden = false;
+  $("tri-dump-note").textContent = "Opening the first card and reading its panel.";
+  $("tri-dump-text").textContent = "";
+
+  await inject(["content/jobright-dump.js"]);
+  const first = state.result.rows[0].card.cardId;
+  const report = await call("dumpPanel", { rules: toPlain(), cardId: first });
+
+  if (!report || report.__error) {
+    $("tri-dump-note").textContent = `Dump failed: ${report && report.__error ? report.__error : "no response"}`;
+    return;
+  }
+  if (report.error) {
+    $("tri-dump-note").textContent = report.error;
+    $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+    return;
+  }
+
+  const m = report.originalPostMatches || [];
+  const anchors = (report.allPanelAnchors || []).length;
+  const json = report.embeddedJson || {};
+  $("tri-dump-note").textContent =
+    (report.verdict ? report.verdict + " " : "") +
+    `${m.length} element${m.length === 1 ? "" : "s"} matched ORIGINAL_POST_PATTERNS. ` +
+    `${anchors} usable anchor${anchors === 1 ? "" : "s"} in the panel. ` +
+    `${(json.candidates || []).length} off-site URL${(json.candidates || []).length === 1 ? "" : "s"} in embedded JSON. ` +
+    `Patterns in use: ${ORIGINAL_POST_PATTERNS.map((r) => r.source).join("  ")}`;
+
+  $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+}
+
+async function resetThisBoard() {
+  const btn = $("tri-reset");
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1";
+    btn.textContent = "Reset: click again to confirm";
+    setTimeout(() => { btn.dataset.armed = "0"; btn.textContent = "Reset board state"; }, 5000);
+    return;
+  }
+  btn.dataset.armed = "0";
+  btn.textContent = "Reset board state";
+
+  const listingUrls = state.scan ? state.scan.cards.map((c) => c.listingUrl).filter(Boolean) : [];
+  const removed = await resetBoard({ boardUrl: state.scan ? state.scan.url : null, listingUrls });
+
+  state.store = await getTriage();
+  state.result = state.scan ? triageAll(state.scan.cards, state.store) : null;
+  state.report = null;
+  $("tri-status").textContent =
+    `Cleared for this board: ${removed.harvested} harvested record${removed.harvested === 1 ? "" : "s"}, ` +
+    `${removed.shortlist} shortlist entr${removed.shortlist === 1 ? "y" : "ies"}, ${removed.dismissed} dismissal${removed.dismissed === 1 ? "" : "s"}, ` +
+    `plus the run record and harvest flags. Scan again to start clean.`;
+  if (state.result) render();
+}
+
 // -------------------------------------------------------------- stage 2
 
 async function startHarvest() {
@@ -145,6 +219,13 @@ async function startHarvest() {
     render();
   };
   $("tri-queue-apply").onclick = async () => { await syncAutoQueue(true); render(); };
+  $("tri-dump").onclick = () => runDump();
+  $("tri-dump-close").onclick = () => { $("tri-dump-out").hidden = true; };
+  $("tri-dump-copy").onclick = async () => {
+    await navigator.clipboard.writeText($("tri-dump-text").textContent);
+    flash($("tri-dump-copy"), "Copied");
+  };
+  $("tri-reset").onclick = () => resetThisBoard();
   pollProgress();
 }
 

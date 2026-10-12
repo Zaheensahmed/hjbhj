@@ -99,7 +99,9 @@ function render() {
 
   $("q-open-next").disabled = !nextToOpen(state.entries);
 
-  $("q-out").innerHTML = state.entries.map((e, i) => `
+  $("q-out").innerHTML = (state.entries.length
+    ? `<h3 class="subhead">Ready to open (${state.entries.length})</h3>`
+    : "") + state.entries.map((e, i) => `
     <div class="card ${e.queueStatus === "submitted" ? "green" : e.queueStatus === "skipped" ? "" : e.blocked ? "red" : "blue"}">
       <div><strong>${esc(e.company || "(no company)")}</strong> <span class="tagline">${esc(e.verdict || "")}</span></div>
       <div class="val">${esc(e.title || "")}</div>
@@ -123,17 +125,28 @@ function render() {
  * Held-back rows are shown, never silently dropped. Dropping them quietly would
  * be the same disease as queueing them quietly.
  */
+/**
+ * Held-back rows are NOT the queue. They were rendered in the same card style
+ * as queue rows, which made a working gate look exactly like the failure it
+ * prevents: a list of REVIEW verdicts next to jobright.ai URLs. They are now
+ * walled off and labelled.
+ */
 function heldHtml() {
   if (!state.held.length) return "";
-  return `<h3 class="subhead">Held back (${state.held.length})</h3>
-    <p class="note">Shortlisted but not ready to open. Each one names which step is missing. None of these can be opened or marked submitted.</p>
+  return `<div class="held-wrap">
+    <div class="held-head">Not in the queue (${state.held.length})</div>
+    <p class="not-queue">These are shortlisted but blocked from the queue. They cannot be opened or marked submitted.
+      The jobright.ai link below each one is what was scanned, <strong>not</strong> a destination.</p>
     ${state.held.map((e) => `
       <div class="card amber">
-        <div><strong>${esc(e.company || "(no company)")}</strong> <span class="verdict ${e.verdict === "SKIP" ? "v-skip" : "v-review"}">${esc(e.verdict)}</span></div>
+        <div><strong>${esc(e.company || "(no company)")}</strong>
+          <span class="verdict ${e.verdict === "SKIP" ? "v-skip" : "v-review"}">${esc(e.verdict)}</span>
+          <span class="tagline">blocked from queue</span></div>
         <div class="val">${esc(e.title || "")}</div>
         <div class="why">${e.heldBecause.map((r) => esc(r.text)).join("<br>")}</div>
-        <div class="meta">jobright: ${esc((e.jobrightUrl || "").slice(0, 54))}</div>
-      </div>`).join("")}`;
+        <div class="meta">scanned from: ${esc((e.jobrightUrl || "").slice(0, 54))}</div>
+      </div>`).join("")}
+  </div>`;
 }
 
 function wire() {

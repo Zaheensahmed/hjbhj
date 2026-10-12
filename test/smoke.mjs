@@ -934,8 +934,8 @@ group("Feature 3: rules and scanner hygiene");
 
   const triTab = stripComments(fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8"));
   ok("the triage tab clicks nothing on the page", !/"click"|'click'|\.click\s*\(/.test(triTab));
-  ok("the triage tab calls only scanBoard, focusCard and harvest",
-    [...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].every((m) => ["scanBoard", "focusCard", "harvest"].includes(m[1])),
+  ok("the triage tab calls only scanBoard, focusCard, harvest and dumpPanel",
+    [...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].every((m) => ["scanBoard", "focusCard", "harvest", "dumpPanel"].includes(m[1])),
     JSON.stringify([...triTab.matchAll(/call\("([a-zA-Z]+)"/g)].map((m) => m[1])));
 }
 
@@ -1657,6 +1657,70 @@ if (fs.existsSync(localTests)) {
 } else {
   group("Local seed-content tests");
   skip("test/seed.local.mjs", "not present. It is gitignored, so a clean clone has only the structural checks.");
+}
+
+
+// ---------------------------------------------------------------------------
+group("Diagnostics: the DOM dump reads, it does not click around");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const src = stripComments(fs.readFileSync(path.join(root, "content/jobright-dump.js"), "utf8"));
+
+  // Exactly two clicks: the card, and the panel's close control.
+  const clicks = [...src.matchAll(/(\w+)\.click\s*\(\)/g)].map((m) => m[1]);
+  ok("the dump clicks exactly two things", clicks.length === 2, JSON.stringify(clicks));
+  ok("and they are the card and the close control",
+    clicks.includes("card") && clicks.includes("closeBtn"), JSON.stringify(clicks));
+  ok("it checks FORBIDDEN_CLICK before clicking the card",
+    src.indexOf("forbidden(card, rules)") < src.indexOf("card.click()"));
+  ok("it filters forbidden elements out of the close candidates", /forbidden\(el, rules\)/.test(src));
+
+  // It must never click the control it is describing.
+  ok("it never clicks an element it matched against ORIGINAL_POST_PATTERNS",
+    !/innermost[\s\S]{0,200}\.click\s*\(/.test(src) && !/originalPostMatches[\s\S]{0,200}\.click\s*\(/.test(src));
+  ok("it never submits", !/\.submit\s*\(|requestSubmit/.test(src));
+  ok("it makes no network request", !/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(src));
+  ok("it never touches Find Any Email", !/find\s*any\s*email/i.test(src));
+
+  // It has to report the things actually asked for.
+  for (const field of ["tagName", "attributes", "outerHTML", "closestAnchor", "descendantAnchors",
+                       "siblingAnchors", "ancestorsWithDataOrHref", "embeddedJson", "allPanelAnchors",
+                       "looserMatches"]) {
+    ok(`the dump reports ${field}`, new RegExp(`\\b${field}\\b`).test(src));
+  }
+  ok("it looks for a Next.js payload", /__NEXT_DATA__/.test(src));
+  ok("it looks in JSON script tags", /application\/json/.test(src));
+  ok("it looks at known app globals", /__APOLLO_STATE__|__INITIAL_STATE__|__NUXT__/.test(src));
+  ok("it ignores jobright's own URLs when hunting for a destination", /jobright\\\.ai/.test(src) || /jobright\.ai/.test(src));
+  ok("it waits on wall-clock and allows for a hidden tab", /Date\.now\(\)/.test(src) && /document\.hidden/.test(src));
+}
+
+// ---------------------------------------------------------------------------
+group("Diagnostics: reset is scoped and the queue is unambiguous");
+{
+  const store = fs.readFileSync(path.join(root, "shared/store.js"), "utf8");
+  ok("resetBoard exists", /export async function resetBoard/.test(store));
+  ok("it scopes by the board's listing URLs", /urls\.has\(key\)/.test(store));
+  ok("it also matches harvested records by pageUrl", /rec\.pageUrl === boardUrl/.test(store));
+  ok("it clears harvested, shortlist and dismissed", /removed\.harvested/.test(store) && /removed\.shortlist/.test(store) && /removed\.dismissed/.test(store));
+  ok("it clears the run record", /t\.run = null/.test(store));
+  ok("it clears the harvest progress and control flags", /remove\(\["harvest_progress", "harvest_control"\]\)/.test(store));
+  ok("it can clear every board when asked", /scope === "all"/.test(store));
+
+  const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
+  ok("reset asks for confirmation before wiping", /armed/.test(tri) && /click again to confirm/i.test(tri));
+  ok("reset reports what it removed", /Cleared for this board/.test(tri));
+
+  // The presentation bug: held-back rows looked exactly like queue rows.
+  const q = fs.readFileSync(path.join(root, "popup/tab-queue.js"), "utf8");
+  ok("held-back rows are labelled as not being in the queue", /Not in the queue/.test(q));
+  ok("they are walled off in their own container", /held-wrap/.test(q));
+  ok("each says it is blocked from the queue", /blocked from queue/.test(q));
+  ok("the jobright link is labelled as scanned-from, not a destination",
+    /scanned from:/.test(q) && /not<\/strong> a destination/.test(q));
+  ok("the real queue has its own heading", /Ready to open/.test(q));
+  ok("the two sections cannot be confused by style", /class="card amber"/.test(q) && /held-head/.test(q));
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);

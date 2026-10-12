@@ -118,8 +118,22 @@
         <label class="check"><input type="checkbox" id="tri-auto-queue" checked> auto-queue APPLY rows</label>
         <button id="tri-queue-apply" class="small">Queue all APPLY now</button>
       </div>
+      <div class="row">
+        <button id="tri-dump" class="small">Dump panel DOM</button>
+        <button id="tri-reset" class="small danger">Reset board state</button>
+      </div>
       <p class="note" id="tri-harvest-status"></p>
       <p class="note">The loop runs in the page, so you can close this popup and switch tabs. It opens each card, reads the panel, closes it with the X, and waits 3 to 6 seconds. It never clicks Apply, Easy Apply, Save or Dismiss, and it reads the Original Job Post link rather than clicking it.</p>
+    </div>
+
+    <div id="tri-dump-out" hidden>
+      <div class="row">
+        <strong class="subhead" style="margin:0">Panel DOM dump</strong>
+        <button id="tri-dump-copy" class="small">Copy all</button>
+        <button id="tri-dump-close" class="small ghost">Hide</button>
+      </div>
+      <p class="note" id="tri-dump-note"></p>
+      <pre id="tri-dump-text"></pre>
     </div>
 
     <div id="tri-out"></div>

@@ -127,3 +127,36 @@ export async function addTrackerRecord(record) {
   await chrome.storage.local.set({ tracker_overlay: overlay });
   return { overlay, added: i === -1 };
 }
+
+/**
+ * Clear everything stored for one board: harvested records, shortlist entries,
+ * dismissals, the run record and the harvest control flags. Scoped by the
+ * listing URLs currently on the board, plus any harvested record whose pageUrl
+ * matches, so retesting starts genuinely clean instead of fighting stale rows.
+ *
+ * Pass scope "all" to clear every board.
+ */
+export async function resetBoard({ boardUrl = null, listingUrls = [], scope = "board" } = {}) {
+  const t = await getTriage();
+  const urls = new Set(listingUrls.filter(Boolean));
+  const all = scope === "all";
+  const removed = { harvested: 0, shortlist: 0, dismissed: 0 };
+
+  for (const key of Object.keys(t.harvested || {})) {
+    const rec = t.harvested[key];
+    if (all || urls.has(key) || (boardUrl && rec && rec.pageUrl === boardUrl)) {
+      delete t.harvested[key]; removed.harvested++;
+    }
+  }
+  for (const key of Object.keys(t.shortlist || {})) {
+    if (all || urls.has(key)) { delete t.shortlist[key]; removed.shortlist++; }
+  }
+  for (const key of Object.keys(t.dismissed || {})) {
+    if (all || urls.has(key)) { delete t.dismissed[key]; removed.dismissed++; }
+  }
+  t.run = null;
+
+  await chrome.storage.local.set({ [K.TRIAGE]: t });
+  await chrome.storage.local.remove(["harvest_progress", "harvest_control"]);
+  return removed;
+}
