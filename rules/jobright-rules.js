@@ -64,7 +64,7 @@ export const FIELD_PATTERNS = {
   jobType: [
     /\b(internship|intern|co-?op|full[- ]time|part[- ]time|contract|temporary|apprenticeship)\b/i
   ],
-  // "Your City, MD", "New York, NY", "Remote, US"
+  // "Baltimore, MD", "New York, NY", "Remote, US"
   location: [
     /\b([A-Z][A-Za-z.'\-]+(?:\s+[A-Z][A-Za-z.'\-]+){0,3},\s*(?:[A-Z]{2}\b|[A-Z][a-z]+\b))/
   ],

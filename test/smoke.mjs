@@ -785,7 +785,7 @@ group("Feature 3: stage-1 verdicts");
   ok("onsite and far but in summer does NOT skip, because summer relocation is fine",
     farSummer.verdict === "REVIEW", JSON.stringify(codes(farSummer, "skip")));
 
-  const nearTermTime = triageCard(card({ startTerm: term("fall"), arrangement: "Onsite", location: "Your City, MD" }));
+  const nearTermTime = triageCard(card({ startTerm: term("fall"), arrangement: "Onsite", location: "Baltimore, MD" }));
   ok("onsite term-time but local is not skipped for distance",
     !codes(nearTermTime, "skip").includes("onsite_termtime_far"));
 
@@ -834,7 +834,7 @@ group("Feature 3: stage-1 verdicts");
   let combos = 0;
   for (const season of [null, "summer", "fall", "winter", "spring"]) {
     for (const arrangement of [null, "Remote", "Hybrid", "Onsite"]) {
-      for (const location of [null, "Your City, MD", "Seattle, WA", "Arlington, VA", "Remote"]) {
+      for (const location of [null, "Baltimore, MD", "Seattle, WA", "Arlington, VA", "Remote"]) {
         for (const tags of [[], ["Security Clearance"], ["U.S. Citizen Only"], ["Security Clearance", "U.S. Citizen Only"]]) {
           for (const alumni of [null, 0, 7]) {
             for (const applicants of [null, 1, 500]) {
@@ -861,7 +861,7 @@ group("Feature 3: ranking and persistence");
   const term = (season) => ({ season, year: 2027, label: `2027 ${season}` });
   const mk = (id, o) => ({
     cardId: id, index: 1, listingUrl: `https://jobright.ai/jobs/info/${id}`,
-    title: `T${id}`, company: `C${id}`, location: "Your City, MD", arrangement: "Hybrid",
+    title: `T${id}`, company: `C${id}`, location: "Baltimore, MD", arrangement: "Hybrid",
     jobType: "Internship", pay: null, startTerm: term("summer"), applicants: null, posted: null,
     earlyApplicant: false, alumni: null, matchPercent: null, matchLabel: null, tags: [],
     applyButtons: [], industry: null, rawText: "raw", ...o
@@ -911,7 +911,7 @@ group("Feature 3: rules and scanner hygiene");
     new RegExp(JSON.parse(json).FIELD_PATTERNS.startTerm[0].source, "i").test("Start in 2027 Summer"));
 
   ok("NEAR_HOME covers Baltimore and the DC area",
-    ["Your City, MD", "Arlington, VA", "Washington, DC", "Fort Meade, MD"].every((l) => JR.NEAR_HOME.some((re) => re.test(l))));
+    ["Baltimore, MD", "Arlington, VA", "Washington, DC", "Fort Meade, MD"].every((l) => JR.NEAR_HOME.some((re) => re.test(l))));
   ok("NEAR_HOME excludes the far cases",
     ["Seattle, WA", "Austin, TX", "New York, NY", "San Jose, CA"].every((l) => !JR.NEAR_HOME.some((re) => re.test(l))));
   ok("summer is the only non-term-time season",
@@ -945,7 +945,7 @@ group("Feature 4: panel parsing");
 {
   const PANEL = [
     "Acme Defense", "Posted 2 days ago", "Security Engineering Intern",
-    "Your City, MD", "Onsite", "$25 - $32 / hour", "Internship", "Start in 2027 Summer",
+    "Baltimore, MD", "Onsite", "$25 - $32 / hour", "Internship", "Start in 2027 Summer",
     "Acme Defense builds secure telemetry systems for industrial customers across the mid-Atlantic and beyond.",
     "82% match", "Experience Level 70%", "Skill 90%", "Education Match 65%",
     "U.S. Citizen Only", "Security Clearance", "142 applicants",
@@ -1237,7 +1237,7 @@ group("Feature 5: the tracker record a submission becomes");
   };
   const harvested = {
     record: {
-      header: { company: "Acme Defense", title: "Security Engineering Intern", location: "Your City, MD", startTerm: { label: "2027 Summer" } },
+      header: { company: "Acme Defense", title: "Security Engineering Intern", location: "Baltimore, MD", startTerm: { label: "2027 Summer" } },
       match: { overall: 82 },
       resolvesOnOpen: false,
       insider: { leads: [] }
@@ -1248,7 +1248,7 @@ group("Feature 5: the tracker record a submission becomes");
   const rec = toTrackerRecord(entry, harvested, "2026-10-12");
   ok("the record carries the company", rec.company === "Acme Defense");
   ok("the record carries the role", rec.role === "Security Engineering Intern");
-  ok("the record carries the location from the harvest", rec.location === "Your City, MD");
+  ok("the record carries the location from the harvest", rec.location === "Baltimore, MD");
   ok("the record carries the term", rec.term === "2027 Summer");
   ok("the portal URL is the destination, not the Jobright link", rec.portal_url === entry.destinationUrl);
   ok("the ATS is filled in from the destination", rec.ats === "Greenhouse");
