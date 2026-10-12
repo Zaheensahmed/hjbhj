@@ -88,7 +88,12 @@ export const HARD_DETECTORS = [
     ],
     judge(matchText, profile) {
       const school = profile.education.current_school;
-      if (/your campus|your school/i.test(matchText)) {
+      // Compare against the profile's own school rather than a hard-coded name,
+      // so this file carries no one's identity.
+      const words = school.split(/[^A-Za-z]+/).filter((w) => w.length > 3);
+      const named = words.length && words.every((w) => new RegExp(`\\b${w}\\b`, "i").test(matchText));
+      const acronym = words.length > 1 && new RegExp(`\\b${words.map((w) => w[0]).join("")}\\b`, "i").test(matchText);
+      if (named || acronym) {
         return { verdict: "ok", why: `Names your school (${school}).` };
       }
       // "must be enrolled at a participating consortium school" restricts by

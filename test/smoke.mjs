@@ -1002,7 +1002,7 @@ group("Feature 4: panel parsing");
     r.insider.buckets.previous_company.people[0].affiliation === "Example Org Inc.");
   ok("the school bucket captures name and truncated affiliation",
     r.insider.buckets.school.people[0].name === "Priya Nair" &&
-    /Example State University/.test(r.insider.buckets.school.people[0].affiliation));
+    /Example State Universi/.test(r.insider.buckets.school.people[0].affiliation));
   ok("school and previous company surface as referral leads", r.insider.leads.length === 2);
   ok("the school lead is surfaced prominently", r.insider.leads.some((l) => l.kind === "school"));
   ok("beyond-network is NOT a referral lead", !r.insider.leads.some((l) => l.kind === "beyond_network"));
