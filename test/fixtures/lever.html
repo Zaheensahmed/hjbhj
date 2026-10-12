@@ -1,0 +1,68 @@
+<!-- Lever-style markup. Labels are nested divs inside the label element, one
+     question is identifiable only from its name attribute, and one relies on a
+     preceding block of text. -->
+<h2>Submit your application</h2>
+<form id="lever_form">
+  <ul class="application-questions">
+    <li class="application-question">
+      <label>
+        <div class="application-label">Full name<span class="required">&#10033;</span></div>
+        <input type="text" name="name" required>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Email<span class="required">&#10033;</span></div>
+        <input type="email" name="email" required>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Phone</div>
+        <input type="tel" name="phone">
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Current location</div>
+        <input type="text" name="location" aria-label="City">
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">LinkedIn URL</div>
+        <input type="text" name="urls[LinkedIn]">
+      </label>
+    </li>
+    <li class="application-question">
+      <div class="application-label">What is your desired hourly rate?</div>
+      <input type="text" name="cards[rate][field0]" required>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Are you able to obtain a security clearance?</div>
+        <select name="cards[clearance][field0]">
+          <option value="">Select one...</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Describe your relevant experience</div>
+        <textarea name="cards[exp][field0]" maxlength="600"></textarea>
+      </label>
+    </li>
+    <li class="application-question">
+      <input type="text" name="favourite_programming_language">
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Resume<span class="required">&#10033;</span></div>
+        <input type="file" name="resume" accept=".pdf,.docx" required>
+      </label>
+    </li>
+  </ul>
+  <button type="submit">Submit application</button>
+</form>

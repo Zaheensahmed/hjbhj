@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Autofill fixture run</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 1fr 1fr; height: 100vh; }
+  #page { overflow: auto; padding: 16px; border-right: 1px solid #ccc; }
+  #report { overflow: auto; padding: 16px; background: #fafafa; }
+  h1 { font-size: 15px; }
+  h2 { font-size: 13px; margin-top: 18px; }
+  .field, .application-question { margin-bottom: 10px; }
+  label { display: block; font-weight: 600; font-size: 12px; }
+  input[type=text], input[type=email], input[type=tel], select, textarea { width: 100%; padding: 4px; }
+  textarea { min-height: 48px; }
+  ul.application-questions { list-style: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  td, th { border-bottom: 1px solid #ddd; padding: 3px 5px; text-align: left; vertical-align: top; }
+  .green { color: #16a34a; } .blue { color: #2563eb; } .amber { color: #d97706; } .red { color: #dc2626; }
+  code { background: #eee; padding: 1px 3px; }
+</style>
+</head>
+<body>
+<div id="page">
+  <h1>Fixtures</h1>
+  <div id="jd">
+    <p>Summer 2027 Offensive Security Intern. You will perform penetration testing
+    and vulnerability research against embedded devices, reverse engineer firmware,
+    and write proof-of-concept exploits. The range for this role is $22 - $28 per hour.
+    We prefer rising juniors or seniors. Minimum GPA of 3.0 required. Nice to have:
+    Ghidra, Burp Suite, AWS, Kubernetes. This role is on-site in Arlington, Virginia
+    for the summer term. Must have the ability to obtain a security clearance.</p>
+  </div>
+  <div id="fixtures"></div>
+</div>
+<div id="report">Loading.</div>
+
+<script src="../content/label.js"></script>
+<script src="../content/scan.js"></script>
+<script src="../content/fill.js"></script>
+<script type="module">
+import { parsePosting } from "../engine/posting.js";
+import { checkEligibility } from "../engine/eligibility.js";
+import { assemble } from "../engine/assembler.js";
+import { matchFields } from "../engine/matcher.js";
+import { normLabel } from "../engine/normalize.js";
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const [gh, lever, profile] = await Promise.all([
+  fetch("fixtures/greenhouse.html").then((r) => r.text()),
+  fetch("fixtures/lever.html").then((r) => r.text()),
+  fetch("../data/profile.json").then((r) => r.json())
+]);
+document.getElementById("fixtures").innerHTML = gh + lever;
+
+const scan = JAF.scan();
+for (const f of [...scan.fields, ...scan.uploads]) f.labelNorm = normLabel(f.labelRaw);
+
+const posting = parsePosting({ text: document.getElementById("jd").innerText, title: "Summer 2027 Offensive Security Intern", host: "fixture" });
+const eligibility = checkEligibility(profile, posting);
+const assembled = assemble(profile, posting);
+const m = matchFields(scan.fields, { profile, posting, assembled, learned: {}, prefs: {} });
+
+JAF.applyPlan({
+  plan: m.plan.map((p) => ({ targetJafId: p.targetJafId, kind: p.kind, value: p.value, tier: p.tier, ruleId: p.ruleId })),
+  unknownIds: m.unknowns.map((u) => u.field.jafId),
+  manualIds: m.manual.map((x) => x.field.jafId),
+  uploadIds: scan.uploads.map((u) => u.jafId)
+});
+
+const rows = (items, fn) => items.map(fn).join("");
+
+document.getElementById("report").innerHTML = `
+  <h1>Report</h1>
+  <p>${scan.fields.length} fields, ${scan.uploads.length} uploads. Detected ATS: <code>${esc(scan.ats)}</code>.
+  Role type: <code>${esc(assembled.roleType || "none")}</code>. Assembler ok: <code>${assembled.ok}</code>.</p>
+
+  <h2 class="red">Upload manually (${scan.uploads.length})</h2>
+  <table>${rows(scan.uploads, (u) => `<tr><td>${esc(u.labelRaw)}</td><td>${u.required ? "required" : ""}</td></tr>`)}</table>
+
+  <h2>Eligibility</h2>
+  <p>blocked: <code>${eligibility.blocked}</code></p>
+  <table>${rows([...eligibility.blockers.map((b) => ({ ...b, k: "blocker" })), ...eligibility.flags.map((f) => ({ ...f, k: "flag" })), ...eligibility.cleared.map((c) => ({ ...c, k: "cleared" }))],
+    (r) => `<tr><td class="${r.k === "blocker" ? "red" : r.k === "flag" ? "amber" : "green"}">${esc(r.k)}</td><td>${esc(r.id)}</td><td>${esc(r.sentence)}<br><em>${esc(r.why || r.argue)}</em></td></tr>`)}</table>
+
+  <h2 class="green">Filled (${m.confident.length})</h2>
+  <table>${rows(m.confident, (p) => `<tr><td>${esc(p.field.labelRaw)}</td><td>${esc(p.display)}</td><td><code>${esc(p.ruleId)}</code><br>${esc(p.source)}</td></tr>`)}</table>
+
+  <h2 class="blue">Verify (${m.review.length})</h2>
+  <table>${rows(m.review, (p) => `<tr><td>${esc(p.field.labelRaw)}</td><td>${esc(p.display)}</td><td><code>${esc(p.ruleId)}</code><br>${esc(p.source)}</td></tr>`)}</table>
+
+  <h2 class="amber">Unknown (${m.unknowns.length})</h2>
+  <table>${rows(m.unknowns, (u) => `<tr><td>${esc(u.field.labelRaw || u.field.name)}</td><td>${esc(u.reason)}</td><td><code>${esc(u.field.labelSource)}</code></td></tr>`)}</table>
+
+  <h2 class="amber">Your call (${m.manual.length})</h2>
+  <table>${rows(m.manual, (x) => `<tr><td>${esc(x.field.labelRaw || x.field.name)}</td><td>${esc(x.note)}</td></tr>`)}</table>
+
+  <h2>EEO (${m.eeo.length})</h2>
+  <table>${rows(m.eeo, (e) => `<tr><td>${esc(e.field.labelRaw)}</td><td>${e.decline ? esc(e.decline.textRaw) : "no decline option found"}</td></tr>`)}</table>
+
+  <h2>Assembled</h2>
+  ${assembled.entries.map((e) => `<p><strong>${esc(e.header.employer || e.header.name)}${e.isLead ? " (lead)" : ""}</strong></p><ul>${e.bullets.map((b) => `<li>${esc(b.text)}</li>`).join("")}</ul>`).join("")}
+  <p><strong>Skills:</strong> ${esc(assembled.skills.map((s) => s.skill).join(", "))}</p>
+  <p class="amber"><strong>Gaps:</strong> ${esc(assembled.gaps.join(", "))}</p>
+`;
+</script>
+</body>
+</html>

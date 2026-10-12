@@ -1,0 +1,116 @@
+<!-- Greenhouse-style markup. Labels via label[for], questions in .field
+     containers, one select whose only sane option is vetoed by a profile rule,
+     and two file inputs that cannot be filled by script. -->
+<h2>Apply for this job</h2>
+<form id="greenhouse_form">
+  <div class="field">
+    <label for="first_name">First Name <span class="required">*</span></label>
+    <input id="first_name" name="job_application[first_name]" type="text" autocomplete="given-name" required>
+  </div>
+  <div class="field">
+    <label for="last_name">Last Name <span class="required">*</span></label>
+    <input id="last_name" name="job_application[last_name]" type="text" autocomplete="family-name" required>
+  </div>
+  <div class="field">
+    <label for="email">Email <span class="required">*</span></label>
+    <input id="email" name="job_application[email]" type="email" autocomplete="email" required>
+  </div>
+  <div class="field">
+    <label for="phone">Phone</label>
+    <input id="phone" name="job_application[phone]" type="tel">
+  </div>
+  <div class="field">
+    <label for="resume">Resume/CV <span class="required">*</span></label>
+    <input id="resume" name="job_application[resume]" type="file" accept=".pdf,.doc,.docx" required>
+  </div>
+  <div class="field">
+    <label for="cover_letter">Cover Letter</label>
+    <input id="cover_letter" name="job_application[cover_letter]" type="file" accept=".pdf,.doc,.docx">
+  </div>
+  <div class="field">
+    <label for="gh_school">School</label>
+    <input id="gh_school" name="job_application[answers][school]" type="text">
+  </div>
+  <div class="field">
+    <label for="gh_degree">Degree</label>
+    <select id="gh_degree" name="job_application[answers][degree]">
+      <option value="">Select...</option>
+      <option value="hs">High School Diploma</option>
+      <option value="assoc">Associate's Degree</option>
+      <option value="bs">Bachelor's Degree</option>
+      <option value="ms">Master's Degree</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="gh_discipline">Discipline</label>
+    <select id="gh_discipline" name="job_application[answers][discipline]">
+      <option value="">Select...</option>
+      <option value="cyber">Cybersecurity</option>
+      <option value="cs">Computer Science</option>
+      <option value="is">Information Systems</option>
+      <option value="ee">Electrical Engineering</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="gh_grad">Expected graduation date</label>
+    <input id="gh_grad" name="job_application[answers][grad]" type="text" placeholder="MM/YY">
+  </div>
+  <div class="field">
+    <label for="gh_gpa">GPA</label>
+    <input id="gh_gpa" name="job_application[answers][gpa]" type="text">
+  </div>
+  <div class="application-question">
+    <label for="gh_auth">Are you legally authorized to work in the United States?</label>
+    <select id="gh_auth" name="job_application[answers][auth]">
+      <option value="">Select...</option>
+      <option value="1">Yes</option>
+      <option value="0">No</option>
+    </select>
+  </div>
+  <div class="application-question">
+    <label for="gh_sponsor">Will you now or in the future require visa sponsorship?</label>
+    <select id="gh_sponsor" name="job_application[answers][sponsor]">
+      <option value="">Select...</option>
+      <option value="1">Yes</option>
+      <option value="0">No</option>
+    </select>
+  </div>
+  <div class="application-question">
+    <fieldset>
+      <legend>Have you registered with the Selective Service?</legend>
+      <label><input type="radio" name="ss" value="yes"> Yes</label>
+      <label><input type="radio" name="ss" value="no"> No</label>
+      <label><input type="radio" name="ss" value="na"> Not applicable</label>
+    </fieldset>
+  </div>
+  <div class="application-question">
+    <label for="gh_skills">Relevant technical skills</label>
+    <textarea id="gh_skills" name="job_application[answers][skills]" maxlength="250"></textarea>
+  </div>
+  <div class="application-question">
+    <label for="gh_why">Why do you want to work here?</label>
+    <textarea id="gh_why" name="job_application[answers][why]"></textarea>
+  </div>
+  <div class="application-question">
+    <label for="gh_heard">How did you hear about this job?</label>
+    <select id="gh_heard" name="job_application[answers][heard]">
+      <option value="">Select...</option>
+      <option value="board">Online job board</option>
+      <option value="referral">Employee referral</option>
+      <option value="career">Career fair</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="gh_gender">Gender</label>
+    <select id="gh_gender" name="job_application[demographic][gender]">
+      <option value="">Select...</option>
+      <option value="m">Male</option>
+      <option value="f">Female</option>
+      <option value="d">Decline To Self Identify</option>
+    </select>
+  </div>
+  <div class="field">
+    <label><input type="checkbox" id="gh_certify" name="certify"> I certify that the information provided is accurate and complete</label>
+  </div>
+  <button type="submit">Submit Application</button>
+</form>

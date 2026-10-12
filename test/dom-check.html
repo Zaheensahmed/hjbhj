@@ -1,0 +1,210 @@
+<!doctype html>
+<!-- test/dom-check.html -- opens straight from the filesystem, no server and no
+     module imports, so it can verify the three content scripts against real
+     DOM. The engine is covered by test/smoke.mjs instead.
+
+     Open this file in a browser. It asserts label resolution across the
+     strategies, what the scanner does and does not collect, that filling fires
+     the events a framework needs, and that nothing ever submits the form. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Autofill DOM check</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
+  #page { overflow: auto; padding: 14px; border-right: 1px solid #ccc; }
+  #out { overflow: auto; padding: 14px; background: #fafafa; white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  label { display: block; font-weight: 600; font-size: 12px; margin-top: 8px; }
+  input[type=text], input[type=email], input[type=tel], select, textarea { width: 100%; padding: 3px; }
+  .ok { color: #16a34a; } .bad { color: #dc2626; font-weight: 700; }
+  h3 { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; color: #666; }
+</style>
+</head>
+<body>
+<div id="page">
+<form id="f">
+  <div class="field">
+    <label for="fn">First Name <span class="required">*</span></label>
+    <input id="fn" name="job_application[first_name]" type="text" autocomplete="given-name" required>
+  </div>
+
+  <div class="field">
+    <label for="em">Email <span class="required">*</span></label>
+    <input id="em" name="email" type="email" autocomplete="email">
+  </div>
+
+  <div class="field">
+    <label>Street Address<input id="addr" name="addr" type="text"></label>
+  </div>
+
+  <div class="field">
+    <span id="lb1">Expected graduation date</span>
+    <input id="grad" name="grad" type="text" aria-labelledby="lb1" placeholder="MM/YY">
+  </div>
+
+  <div class="field">
+    <input id="aria" name="whatever" type="text" aria-label="Zip code">
+  </div>
+
+  <div class="application-question">
+    <fieldset>
+      <legend>Have you registered with the Selective Service?</legend>
+      <label><input type="radio" name="ss" value="yes"> Yes</label>
+      <label><input type="radio" name="ss" value="no"> No</label>
+      <label><input type="radio" name="ss" value="na"> Not applicable</label>
+    </fieldset>
+  </div>
+
+  <ul class="application-questions">
+    <li class="application-question">
+      <label>
+        <div class="application-label">LinkedIn URL<span class="required">&#10033;</span></div>
+        <input type="text" name="urls[LinkedIn]">
+      </label>
+    </li>
+    <li class="application-question">
+      <div class="application-label">What is your desired hourly rate?</div>
+      <input type="text" name="cards[rate][field0]" required>
+    </li>
+  </ul>
+
+  <div class="field">
+    <label for="disc">Discipline</label>
+    <select id="disc" name="disc">
+      <option value="">Select...</option>
+      <option value="cyber">Cybersecurity</option>
+      <option value="is">Information Systems</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="skills">Relevant technical skills</label>
+    <textarea id="skills" name="skills" maxlength="250"></textarea>
+  </div>
+
+  <div class="field">
+    <input id="camel" name="favouriteProgrammingLanguage" type="text">
+  </div>
+
+  <div class="field">
+    <label for="ph">&nbsp;</label>
+    <input id="ph" name="x1" type="text" placeholder="Portfolio URL">
+  </div>
+
+  <div class="field">
+    <label for="res">Resume/CV <span class="required">*</span></label>
+    <input id="res" name="resume" type="file" accept=".pdf,.docx" required>
+  </div>
+
+  <input type="hidden" name="utf8" value="x">
+  <input type="text" name="disabled_one" disabled>
+  <input type="password" name="pw">
+  <label><input type="checkbox" id="cert" name="certify"> I certify that the information provided is accurate and complete</label>
+  <button type="submit" id="sub">Submit Application</button>
+</form>
+</div>
+<div id="out"></div>
+
+<script src="../content/label.js"></script>
+<script src="../content/scan.js"></script>
+<script src="../content/fill.js"></script>
+<script>
+(() => {
+  const out = [];
+  let pass = 0, fail = 0;
+  const ok = (name, cond, detail) => {
+    if (cond) { pass++; out.push(`<span class="ok">ok  </span> ${name}`); }
+    else { fail++; out.push(`<span class="bad">FAIL</span> ${name}${detail ? "\n       " + detail : ""}`); }
+  };
+  const head = (t) => out.push(`<h3>${t}</h3>`);
+
+  // Nothing may submit. If a submit ever fires, the whole point is broken.
+  let submits = 0;
+  document.getElementById("f").addEventListener("submit", (e) => { submits++; e.preventDefault(); });
+
+  // Count the events a framework listens for.
+  const events = { input: 0, change: 0 };
+  for (const t of ["input", "change"]) {
+    document.getElementById("f").addEventListener(t, () => events[t]++, true);
+  }
+
+  const scan = JAF.scan();
+  const byName = (n) => scan.fields.find((f) => f.name === n);
+  const byId = (i) => scan.fields.find((f) => f.id === i);
+
+  head("Label resolution");
+  ok("label[for] wins for a plain field", byId("fn") && byId("fn").labelRaw === "First Name *" && byId("fn").labelSource === "label-for", byId("fn") && `${byId("fn").labelSource}: ${byId("fn").labelRaw}`);
+  ok("autocomplete is recorded for scoring", byId("fn") && byId("fn").autocomplete === "given-name");
+  ok("ancestor label is used when there is no for attribute", byId("addr") && byId("addr").labelRaw === "Street Address" && byId("addr").labelSource === "label-ancestor", byId("addr") && `${byId("addr").labelSource}: ${byId("addr").labelRaw}`);
+  ok("aria-labelledby resolves through the referenced node", byId("grad") && byId("grad").labelRaw === "Expected graduation date" && byId("grad").labelSource === "aria-labelledby", byId("grad") && `${byId("grad").labelSource}: ${byId("grad").labelRaw}`);
+  ok("aria-label is used when nothing else exists", byId("aria") && byId("aria").labelRaw === "Zip code" && byId("aria").labelSource === "aria-label", byId("aria") && `${byId("aria").labelSource}: ${byId("aria").labelRaw}`);
+  ok("placeholder is the last readable fallback", byId("ph") && byId("ph").labelSource === "placeholder" && byId("ph").labelRaw === "Portfolio URL", byId("ph") && `${byId("ph").labelSource}: ${byId("ph").labelRaw}`);
+  ok("a camelCase name becomes readable words", byId("camel") && /favourite Programming Language/i.test(byId("camel").labelRaw) && byId("camel").labelSource === "attribute", byId("camel") && `${byId("camel").labelSource}: ${byId("camel").labelRaw}`);
+  ok("attribute-only labels carry the weakest weight", byId("camel") && byId("camel").labelWeight === 0.45);
+  ok("a Lever nested div label resolves", byName("urls[LinkedIn]") && /LinkedIn URL/.test(byName("urls[LinkedIn]").labelRaw), byName("urls[LinkedIn]") && byName("urls[LinkedIn]").labelRaw);
+  ok("a question with no label element resolves from its container", byName("cards[rate][field0]") && /desired hourly rate/i.test(byName("cards[rate][field0]").labelRaw), byName("cards[rate][field0]") && `${byName("cards[rate][field0]").labelSource}: ${byName("cards[rate][field0]").labelRaw}`);
+
+  head("Scanner");
+  const ss = scan.fields.find((f) => f.tag === "radiogroup");
+  ok("radios collapse into one group", ss && ss.name === "ss" && ss.options.length === 3, ss && String(ss.options.length));
+  ok("the group question comes from the legend", ss && /Selective Service/.test(ss.labelRaw) && ss.labelSource === "legend", ss && `${ss.labelSource}: ${ss.labelRaw}`);
+  ok("each radio option keeps its own element id", ss && ss.options.every((o) => o.jafId) && ss.options[0].textRaw === "Yes", ss && JSON.stringify(ss.options.map((o) => o.textRaw)));
+  ok("select options are captured with text and value", byId("disc") && byId("disc").options.length === 3 && byId("disc").options[1].textRaw === "Cybersecurity");
+  ok("maxlength is captured", byId("skills") && byId("skills").maxLength === 250);
+  ok("required is captured", byId("fn") && byId("fn").required === true);
+  ok("file inputs are separated out, not treated as fillable", scan.uploads.length === 1 && scan.uploads[0].id === "res" && !scan.fields.some((f) => f.tag === "file"));
+  ok("the upload keeps its accept list", scan.uploads[0].accept === ".pdf,.docx");
+  ok("hidden inputs are skipped", !scan.fields.some((f) => f.name === "utf8"));
+  ok("disabled inputs are skipped", !scan.fields.some((f) => f.name === "disabled_one"));
+  ok("submit buttons are never collected", !scan.fields.some((f) => f.type === "submit"));
+  ok("a password field is collected but the matcher drops it", Boolean(scan.fields.find((f) => f.type === "password")));
+  ok("every field carries a stable element handle", scan.fields.every((f) => f.jafId && document.querySelector(`[data-jaf-id="${f.jafId}"]`)));
+
+  head("Fill");
+  const plan = [
+    { targetJafId: byId("fn").jafId, kind: "value", value: "Casey", tier: "confident", ruleId: "first_name" },
+    { targetJafId: byId("em").jafId, kind: "value", value: "you@example.com", tier: "confident", ruleId: "email" },
+    { targetJafId: byId("disc").jafId, kind: "select", value: "is", tier: "confident", ruleId: "major" },
+    { targetJafId: byId("skills").jafId, kind: "value", value: "Vulnerability assessment, Nmap", tier: "review", ruleId: "skills" },
+    { targetJafId: ss.options[1].jafId, kind: "check", value: "no", tier: "review", ruleId: "manual_test" },
+    { targetJafId: "jaf-does-not-exist", kind: "value", value: "x", tier: "confident", ruleId: "ghost" }
+  ];
+  const res = JAF.applyPlan({
+    plan,
+    unknownIds: [byId("camel").jafId],
+    manualIds: [document.getElementById("cert").dataset.jafId].filter(Boolean),
+    uploadIds: [scan.uploads[0].jafId]
+  });
+
+  ok("values land in the DOM", document.getElementById("fn").value === "Casey" && document.getElementById("em").value === "you@example.com");
+  ok("a select is set by value", document.getElementById("disc").value === "is");
+  ok("a textarea is set", document.getElementById("skills").value === "Vulnerability assessment, Nmap");
+  ok("the right radio is checked", document.querySelector('input[name="ss"][value="no"]').checked === true);
+  ok("no other radio got checked", document.querySelectorAll('input[name="ss"]:checked').length === 1);
+  ok("input and change both fire so a framework notices", events.input >= 5 && events.change >= 5, JSON.stringify(events));
+  ok("a missing element is reported, not thrown", res.failed.length === 1 && res.failed[0].ruleId === "ghost", JSON.stringify(res.failed));
+  ok("applied items are reported back", res.applied.length === 5, String(res.applied.length));
+
+  head("Outlines");
+  ok("confident fields outline green", document.getElementById("fn").classList.contains("jaf-confident"));
+  ok("review fields outline blue", document.getElementById("skills").classList.contains("jaf-review"));
+  ok("unknown fields outline amber", document.getElementById("camel").classList.contains("jaf-unknown"));
+  ok("uploads outline red", document.getElementById("res").classList.contains("jaf-upload"));
+  ok("a second pass clears the previous marks", (() => {
+    JAF.applyPlan({ plan: [], unknownIds: [], manualIds: [], uploadIds: [] });
+    return !document.getElementById("fn").classList.contains("jaf-confident");
+  })());
+
+  head("The whole point");
+  ok("the form was never submitted", submits === 0, `${submits} submit events`);
+  ok("the submit button was never clicked", document.getElementById("sub").matches(":not(:active)"));
+  ok("scanning and filling changed no button state", document.getElementById("sub").disabled === false);
+  ok("the consent checkbox was not ticked", document.getElementById("cert").checked === false);
+
+  out.push(`\n${pass} passed, ${fail} failed`);
+  document.getElementById("out").innerHTML = out.join("\n");
+  document.title = fail ? `DOM check: ${fail} FAILED` : `DOM check: ${pass} passed`;
+})();
+</script>
+</body>
+</html>
