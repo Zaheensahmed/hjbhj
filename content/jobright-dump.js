@@ -11,6 +11,7 @@
 // everything else. It never clicks the control it is describing.
 
 (() => {
+  console.log("[JAF injected] jobright-dump.js (panel DOM dump)");
   const JR = (globalThis.JAF_JR = globalThis.JAF_JR || {});
   const text = (el) => (el ? (el.innerText || el.textContent || "").replace(/[^\S\n]+/g, " ").trim() : "");
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

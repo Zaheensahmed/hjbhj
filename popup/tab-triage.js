@@ -9,6 +9,9 @@ import { toPlain, HARVEST, ORIGINAL_POST_PATTERNS } from "../rules/jobright-rule
 import { triageAll } from "../engine/triage.js";
 import { boardReport } from "../engine/assess.js";
 import { $, esc, show, wireCopyText, flash } from "./ui.js";
+import { makeInjector } from "./inject.js";
+
+const { inject, call } = makeInjector(() => state.tabId, "JAF_JR");
 
 const state = { tabId: null, scan: null, store: null, result: null, report: null, prefs: {}, showDismissed: false };
 
@@ -40,23 +43,6 @@ export function initTriageTab({ tabId }) {
 
 export function isJobright(url) {
   try { return /(^|\.)jobright\.ai$/i.test(new URL(url).hostname); } catch { return false; }
-}
-
-async function inject(files) {
-  await chrome.scripting.executeScript({ target: { tabId: state.tabId }, files });
-}
-
-async function call(fnName, arg) {
-  const [res] = await chrome.scripting.executeScript({
-    target: { tabId: state.tabId },
-    args: [fnName, arg === undefined ? null : arg],
-    func: (name, payload) => {
-      const api = globalThis.JAF_JR;
-      if (!api || typeof api[name] !== "function") return { __error: "jobright content script not loaded" };
-      return api[name](payload);
-    }
-  });
-  return res ? res.result : null;
 }
 
 export async function runTriage() {
@@ -128,12 +114,32 @@ async function runDump() {
   $("tri-dump-note").textContent = "Opening the first card and reading its panel.";
   $("tri-dump-text").textContent = "";
 
-  await inject(["content/jobright-dump.js"]);
+  const injected = await inject(["content/jobright-dump.js"]);
+  if (!injected.ok) {
+    console.error("[JAF popup] dump aborted: injection failed", injected.error);
+    $("tri-dump-note").textContent = `Could not inject content/jobright-dump.js: ${injected.error}`;
+    return;
+  }
+
   const first = state.result.rows[0].card.cardId;
-  const report = await call("dumpPanel", { rules: toPlain(), cardId: first });
+  const rules = toPlain();
+  console.log("[JAF popup] dump sending rules keys:", Object.keys(rules), "cardId:", first);
+
+  let report;
+  try {
+    report = await call("dumpPanel", { rules, cardId: first });
+  } catch (err) {
+    console.error("[JAF popup] dump threw", err);
+    $("tri-dump-note").textContent = `Dump threw: ${err && err.message ? err.message : err}`;
+    $("tri-dump-text").textContent = String(err && err.stack ? err.stack : err);
+    return;
+  }
 
   if (!report || report.__error) {
+    console.error("[JAF popup] dump failed", report);
     $("tri-dump-note").textContent = `Dump failed: ${report && report.__error ? report.__error : "no response"}`;
+    $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+    $("tri-dump-out").hidden = false;
     return;
   }
   if (report.error) {

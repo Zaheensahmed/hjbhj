@@ -3,6 +3,7 @@
 // again. No values are changed here, nothing is clicked, nothing is submitted.
 
 (() => {
+  console.log("[JAF injected] scan.js (form scanner)");
   const JAF = (globalThis.JAF = globalThis.JAF || {});
   let counter = 0;
 

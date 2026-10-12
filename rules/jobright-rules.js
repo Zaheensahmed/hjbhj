@@ -169,9 +169,21 @@ export function toPlain() {
     }
     return v;
   };
+  // EVERYTHING an injected content script reads off `rules.` has to be here.
+  // It is not enough to add a rule above: a content script cannot import this
+  // module, so anything missing here arrives as undefined and the script throws
+  // on first use. test/smoke.mjs cross-checks this list against every
+  // `rules.X` in content/, which is the check that was missing when the
+  // stage-2 rules were added and silently never sent.
   return conv({
+    // stage 1, board scan
     CARD_SELECTORS, CARD_EVIDENCE, MIN_CARD_TEXT, MAX_CARD_TEXT,
-    FIELD_PATTERNS, MATCH_PANEL_TAGS, APPLY_BUTTONS, LISTING_HREF_PATTERNS
+    FIELD_PATTERNS, MATCH_PANEL_TAGS, APPLY_BUTTONS, LISTING_HREF_PATTERNS,
+    // stage 2, detail panel harvest and the DOM dump
+    PANEL_EVIDENCE, PANEL_SELECTORS, CLOSE_SELECTORS, CLOSE_TEXTS,
+    FORBIDDEN_CLICK, ORIGINAL_POST_PATTERNS, UNRESOLVED_HREF,
+    SECTION_HEADINGS, INSIDER_BUCKETS, MATCH_SUBSCORES, TAG_MARKED_CLASS,
+    HARVEST
   });
 }
 

@@ -11,6 +11,9 @@ import { assemble } from "../engine/assembler.js";
 import { matchFields } from "../engine/matcher.js";
 import { normLabel, derivePattern } from "../engine/normalize.js";
 import { $, esc, show, setStatus, eligibilityHtml, roleHtml, assembledHtml, wireCopyText } from "./ui.js";
+import { makeInjector } from "./inject.js";
+
+const { inject, call } = makeInjector(() => state.tabId, "JAF");
 
 const state = {
   tabId: null, profile: null, learned: {}, prefs: {},
@@ -31,25 +34,6 @@ export function initPageTab({ profile, learned, prefs, tabId }) {
     await setPrefs(state.prefs);
     runPage({ jdOverride: $("jd").value, rescanDom: false });
   };
-}
-
-// ------------------------------------------------------------------ plumbing
-
-async function inject(files) {
-  await chrome.scripting.executeScript({ target: { tabId: state.tabId }, files });
-}
-
-async function call(fnName, arg) {
-  const [res] = await chrome.scripting.executeScript({
-    target: { tabId: state.tabId },
-    args: [fnName, arg === undefined ? null : arg],
-    func: (name, payload) => {
-      const api = globalThis.JAF;
-      if (!api || typeof api[name] !== "function") return { __error: "content script not loaded" };
-      return api[name](payload);
-    }
-  });
-  return res ? res.result : null;
 }
 
 // ------------------------------------------------------------------ pipeline

@@ -6,6 +6,7 @@
 // guess: autocomplete="email" is not the same evidence as an id of "fld_7".
 
 (() => {
+  console.log("[JAF injected] label.js (label resolution)");
   const JAF = (globalThis.JAF = globalThis.JAF || {});
 
   const STRATEGIES = [

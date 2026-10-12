@@ -1723,6 +1723,92 @@ group("Diagnostics: reset is scoped and the queue is unambiguous");
   ok("the two sections cannot be confused by style", /class="card amber"/.test(q) && /held-head/.test(q));
 }
 
+
+// ---------------------------------------------------------------------------
+group("Injection contract: every rule a content script reads is actually sent");
+{
+  // A content script cannot import rules/jobright-rules.js. It gets a
+  // JSON-safe copy from toPlain(). Anything the script reads off `rules.` that
+  // toPlain() does not include arrives as undefined, and the script throws on
+  // first use with no message anywhere. That is exactly how stage 2 was broken
+  // from the moment it was written: toPlain() listed only the stage-1 keys.
+  const sent = new Set(Object.keys(JR.toPlain()));
+  const contentDir = path.join(root, "content");
+  const missing = [];
+  const unused = new Set(sent);
+
+  for (const file of fs.readdirSync(contentDir).filter((f) => f.endsWith(".js"))) {
+    const src = fs.readFileSync(path.join(contentDir, file), "utf8");
+    for (const m of src.matchAll(/\brules\.([A-Z][A-Z_0-9]*)\b/g)) {
+      const key = m[1];
+      unused.delete(key);
+      if (!sent.has(key)) missing.push(`${file} reads rules.${key}`);
+    }
+  }
+  ok("every rules.X a content script reads is included in toPlain()",
+    missing.length === 0, missing.join(" | "));
+
+  // Named individually, so a failure says which script loses which rule.
+  for (const key of ["PANEL_EVIDENCE", "PANEL_SELECTORS", "CLOSE_SELECTORS", "CLOSE_TEXTS",
+                     "FORBIDDEN_CLICK", "ORIGINAL_POST_PATTERNS", "HARVEST",
+                     "CARD_SELECTORS", "CARD_EVIDENCE", "FIELD_PATTERNS",
+                     "MATCH_PANEL_TAGS", "APPLY_BUTTONS", "LISTING_HREF_PATTERNS"]) {
+    ok(`toPlain() sends ${key}`, sent.has(key));
+  }
+
+  // The dangerous ones specifically: without these the click guard cannot run.
+  const plain = JSON.parse(JSON.stringify(JR.toPlain()));
+  ok("FORBIDDEN_CLICK survives JSON and is iterable",
+    Array.isArray(plain.FORBIDDEN_CLICK) && plain.FORBIDDEN_CLICK.length === JR.FORBIDDEN_CLICK.length);
+  ok("FORBIDDEN_CLICK patterns rebuild after the round trip",
+    plain.FORBIDDEN_CLICK.some((p) => new RegExp(p.source, p.flags).test("Apply with Autofill")));
+  ok("HARVEST timings survive as numbers",
+    plain.HARVEST && plain.HARVEST.renderTimeoutMs === JR.HARVEST.renderTimeoutMs);
+  ok("ORIGINAL_POST_PATTERNS rebuilds and still matches",
+    plain.ORIGINAL_POST_PATTERNS.some((p) => new RegExp(p.source, p.flags).test("Original Job Post")));
+  ok("CLOSE_TEXTS rebuilds and still matches a close glyph",
+    plain.CLOSE_TEXTS.some((p) => new RegExp(p.source, p.flags).test("×")));
+  ok("no key sent collapses to an empty object",
+    !JSON.stringify(plain).includes(":{}"), JSON.stringify(plain).slice(0, 120));
+}
+
+// ---------------------------------------------------------------------------
+group("Injection contract: nothing fails silently");
+{
+  const inj = fs.readFileSync(path.join(root, "popup/inject.js"), "utf8");
+
+  ok("the injected wrapper awaits the content function", /return await api\[name\]\(payload\)/.test(inj));
+  ok("it converts a throw into a reported value, not undefined", /__error/.test(inj) && /catch \(err\)/.test(inj));
+  ok("it reports the stack", /__stack/.test(inj));
+  ok("it says which globals exist when the namespace is missing", /__globals/.test(inj));
+  ok("it lists available functions when the name is wrong", /__available/.test(inj));
+  ok("it never returns a bare undefined", /result === undefined \? \{ __error/.test(inj));
+  ok("injection failures are logged with the file list", /INJECTION FAILED/.test(inj));
+  ok("an executeScript rejection is logged", /executeScript REJECTED/.test(inj));
+  ok("no-frames is logged", /returned no frames/.test(inj));
+  ok("every call logs what it sent", /call \$\{namespace\}\.\$\{fnName\}/.test(inj));
+
+  // Both tabs must go through it, with no private copy left behind.
+  for (const file of ["popup/tab-triage.js", "popup/tab-page.js"]) {
+    const src = fs.readFileSync(path.join(root, file), "utf8");
+    ok(`${file} uses the shared injector`, /makeInjector\(/.test(src));
+    ok(`${file} has no private executeScript`, !/chrome\.scripting\.executeScript/.test(src), file);
+  }
+
+  // Every content script announces itself, so the page console shows what loaded.
+  for (const file of fs.readdirSync(path.join(root, "content")).filter((f) => f.endsWith(".js"))) {
+    const src = fs.readFileSync(path.join(root, "content", file), "utf8");
+    ok(`${file} logs its own name on injection`,
+      new RegExp(`console\\.log\\("\\[JAF injected\\] ${file.replace(".", "\\.")}`).test(src));
+  }
+
+  const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
+  ok("the dump logs the rule keys it sent", /dump sending rules keys/.test(tri));
+  ok("the dump logs a failed injection", /dump aborted: injection failed/.test(tri));
+  ok("the dump logs the raw failure object", /console\.error\("\[JAF popup\] dump failed", report\)/.test(tri));
+  ok("a failed dump still shows the raw response", /JSON\.stringify\(report, null, 2\)/.test(tri));
+}
+
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);
 if (!REAL_PROFILE) console.log("note: ran against data/profile.example.json, so content-specific checks used placeholder values.");
 if (!REAL_TRACKER) console.log("note: ran against tracker/data.example.json.");

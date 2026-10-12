@@ -15,6 +15,7 @@
 // clicked, and Apply is never clicked to discover it.
 
 (() => {
+  console.log("[JAF injected] jobright-harvest.js (detail harvest loop)");
   const JR = (globalThis.JAF_JR = globalThis.JAF_JR || {});
 
   const text = (el) => (el ? (el.innerText || el.textContent || "").replace(/[^\S\n]+/g, " ").trim() : "");

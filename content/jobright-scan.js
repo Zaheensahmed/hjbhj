@@ -11,6 +11,7 @@
 // the rules and lets node test them.
 
 (() => {
+  console.log("[JAF injected] jobright-scan.js (board scanner)");
   const JR = (globalThis.JAF_JR = globalThis.JAF_JR || {});
   let counter = 0;
 

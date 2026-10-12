@@ -8,6 +8,7 @@
 // reading this file's source, so the guarantee survives future edits.
 
 (() => {
+  console.log("[JAF injected] fill.js (form filler)");
   const JAF = (globalThis.JAF = globalThis.JAF || {});
   const STYLE_ID = "jaf-highlight-style";
 
