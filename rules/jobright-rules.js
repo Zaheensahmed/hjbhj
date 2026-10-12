@@ -117,10 +117,11 @@ export const LISTING_HREF_PATTERNS = [
 export const SUMMER_TERMS = ["summer"];
 export const TERM_TIME_TERMS = ["fall", "autumn", "winter", "spring"];
 
-// Commutable from your campus. Everything else counts as far. eligibility_filters
-// records school-year on-site away from your campus as a hard blocker, and
-// always_viable allows remote any term and local flexible term-time.
-export const NEAR_your campus = [
+// Commutable from your campus. Everything else counts as far.
+// eligibility_filters records a school-year on-site role away from campus as a
+// hard blocker, and always_viable allows remote any term and local flexible
+// term-time. Edit this list to match where you actually are.
+export const NEAR_HOME = [
   /\bmaryland\b/i, /\bmd\b/, /\bbaltimore\b/i, /\bcatonsville\b/i, /\bcolumbia\b/i,
   /\bellicott city\b/i, /\btowson\b/i, /\bhanover\b/i, /\blinthicum\b/i, /\bannapolis\b/i,
   /\bfort meade\b/i, /\bft\.? meade\b/i, /\baberdeen\b/i, /\bbethesda\b/i, /\brockville\b/i,

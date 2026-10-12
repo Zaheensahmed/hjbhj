@@ -5,7 +5,7 @@
 // the best verdict it can reach is REVIEW. There is deliberately no APPLY
 // verdict in this module: VERDICTS has two members and nothing can widen it.
 import {
-  SUMMER_TERMS, TERM_TIME_TERMS, NEAR_your campus, REMOTE_PATTERNS, ONSITE_PATTERNS,
+  SUMMER_TERMS, TERM_TIME_TERMS, NEAR_HOME, REMOTE_PATTERNS, ONSITE_PATTERNS,
   LOW_APPLICANT_THRESHOLD, WEIGHTS
 } from "../rules/jobright-rules.js";
 
@@ -15,9 +15,9 @@ export const VERDICTS = ["REVIEW", "SKIP"];
 const isSummer = (term) => Boolean(term) && SUMMER_TERMS.includes(term.season);
 const isTermTime = (term) => Boolean(term) && TERM_TIME_TERMS.includes(term.season);
 
-function nearUmbc(location) {
+function nearHome(location) {
   if (!location) return null;
-  return NEAR_your campus.some((re) => re.test(location));
+  return NEAR_HOME.some((re) => re.test(location));
 }
 
 function arrangementOf(card) {
@@ -45,7 +45,7 @@ export function triageCard(card) {
 
   const term = card.startTerm || null;
   const arrangement = arrangementOf(card);
-  const near = nearUmbc(card.location);
+  const near = nearHome(card.location);
 
   // ---- SKIP: the start term is not summer.
   if (term && !isSummer(term)) {
@@ -63,7 +63,7 @@ export function triageCard(card) {
     reasons.push({
       kind: "skip",
       code: "onsite_termtime_far",
-      text: `Onsite in ${card.location}${term ? ` for a ${term.label} term` : ""}, which is not commutable from your campus. eligibility_filters lists a school-year on-site role away from your campus as a hard blocker.`
+      text: `Onsite in ${card.location}${term ? ` for a ${term.label} term` : ""}, which is not commutable from your campus. eligibility_filters lists a school-year on-site role away from campus as a hard blocker.`
     });
   }
 

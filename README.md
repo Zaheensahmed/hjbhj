@@ -494,7 +494,7 @@ posting rather than a regex. Detectors marked low confidence say so.
 | graduation window excluding May 2029 | hard |
 | active clearance required at application | hard. "ability to obtain" is explicitly **not** a blocker, since `clearance_eligible` is yes |
 | institution restriction | hard, low confidence |
-| school-year on-site away from your campus | hard, low confidence |
+| school-year on-site away from campus | hard, low confidence |
 | rising junior or senior preferred | soft, with the credit-standing counter-argument |
 | penultimate or final year | soft, qualifies |
 | less than N years to graduation | soft, borderline |

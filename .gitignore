@@ -6,3 +6,4 @@ node_modules/
 # Personal data. Copy the .example.json files and fill these in locally.
 data/profile.json
 tracker/data.json
+test/seed.local.mjs

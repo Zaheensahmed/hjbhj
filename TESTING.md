@@ -151,9 +151,8 @@ N not checked in 30+ days. 0 deadlines past." and four view buttons.
 
 Go through all four:
 
-- **All by status** — your 18 applications grouped. Example Company under Under
-  Review with 2026-09-03.
-- **Not checked in 30+ days** — Example Company at 39 days as of 12 October. Nothing
+- **All by status** — your 18 applications grouped. the first row under Under Review with its applied date.
+- **Not checked in 30+ days** — the oldest unchecked row, with its day count. Nothing
   with status To apply.
 - **Upcoming deadlines** — NREIP first at 2026-11-30, then NREIP references,
   then CIA Stokes. The three approximate ones say so.

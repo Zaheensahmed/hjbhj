@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parsePosting } from "../engine/posting.js";
 import { assemble, skillsText } from "../engine/assembler.js";
@@ -689,74 +689,6 @@ group("Feature 2: tracker logic");
 }
 
 // ---------------------------------------------------------------------------
-group("Feature 2: seed data");
-if (!REAL_TRACKER) {
-  skip("the whole seed-data group", "tracker/data.json is not present, so only tracker/data.example.json exists. These assertions check real seeded content.");
-} else {
-  const T = globalThis.JAF_TRACKER;
-  const TODAY = new Date(Date.UTC(2026, 9, 12));
-  const raw = JSON.parse(fs.readFileSync(path.join(root, "tracker/data.json"), "utf8"));
-  const data = T.normalize(raw);
-
-  ok("the seed holds 18 applications", data.applications.length === 18, String(data.applications.length));
-  ok("the seed holds 6 deadlines", data.deadlines.length === 6, String(data.deadlines.length));
-
-  const problems = T.validate(data);
-  ok("the seed has no bad dates", !problems.some((p) => p.kind === "bad-date"), JSON.stringify(problems.filter((p) => p.kind === "bad-date")));
-  ok("the seed has no duplicate ids", !problems.some((p) => p.kind === "duplicate-id"));
-  ok("every seed status is in the statuses list", !problems.some((p) => p.kind === "unknown-status"));
-  ok("the seed has no missing companies", !problems.some((p) => p.kind === "missing" && data.applications.some((a) => a.id === p.id)));
-
-  const find = (id) => data.applications.find((a) => a.id === id);
-  ok("Example Company carries the stated applied date", find("booz-allen").date_applied === "2026-09-03");
-  ok("Example Company carries the referral", /referral/i.test(find("booz-allen").notes));
-  ok("Example Company is Under Review as stated", find("booz-allen").status === "Under Review" && !find("booz-allen").status_assumed);
-  ok("Example Company is Under Consideration as stated", find("honeywell").status === "Under Consideration" && !find("honeywell").status_assumed);
-  ok("Example Company carries the rejection date", find("ch-robinson").date_closed === "2026-10-08" && find("ch-robinson").status === "Rejected");
-  ok("Example Lab records the class-year screen", /class-year screen/i.test(find("apl").notes) && find("apl").status === "Rejected");
-  ok("Example Company carries the requisition number", /REQ-00000/.test(find("mitre").notes) && find("mitre").status === "To apply");
-  ok("Example Company carries the role as given", find("lockheed-martin").role === "SWE Cyber Intern");
-  ok("QRT carries the location", find("qrt").location === "New York, NY");
-  ok("Example Company carries the location", find("td-bank").location === "Mount Laurel, NJ");
-  ok("the three low-expectation companies are marked low",
-    ["amazon", "google", "mandiant"].every((id) => find(id).priority === "low"));
-  ok("every to-apply record has a next action",
-    data.applications.filter((a) => a.status === "To apply").every((a) => a.next_action));
-
-  // Statuses the user never stated are flagged rather than presented as fact.
-  const assumed = data.applications.filter((a) => a.status_assumed).map((a) => a.id);
-  ok("inferred statuses are marked as assumed", assumed.length === 9, `${assumed.length}: ${assumed.join(",")}`);
-  ok("nothing was invented into a URL field", data.applications.every((a) => a.portal_url === ""));
-  ok("nothing was invented into an account email field", data.applications.every((a) => a.account_email === ""));
-
-  // Deadlines match the profile's key_deadlines.
-  const dl = (id) => data.deadlines.find((d) => d.id === id);
-  ok("NREIP application deadline", dl("nreip-application").due === "2026-11-30");
-  ok("NREIP references deadline", dl("nreip-references").due === "2026-12-14");
-  ok("NREIP references names Example Supervisor", /Example Supervisor/.test(dl("nreip-references").note));
-  ok("Example Company eCTF deadline", dl("mitre-ectf").due === "2027-01-31");
-  ok("Example Company eCTF notes the dev board date", /November 4/.test(dl("mitre-ectf").note));
-  ok("CIA Stokes is marked approximate with its real wording",
-    dl("cia-stokes").due_approx && /mid-December/.test(dl("cia-stokes").due_text));
-  ok("your campus SFS is marked approximate", dl("your campus-cybercorps-sfs").due_approx);
-  ok("Capital One and Deloitte window is marked approximate", dl("capital-one-deloitte").due_approx);
-  ok("every profile key_deadline has a tracker row",
-    profile.key_deadlines.every((k) => data.deadlines.some((d) => d.item === k.item || d.item.startsWith(k.item.split(" ")[0]))),
-    profile.key_deadlines.map((k) => k.item).join(" | "));
-
-  // Views over the real seed.
-  ok("the status view covers every record",
-    T.byStatus(data).reduce((n, g) => n + g.items.length, 0) === data.applications.length);
-  const st = T.stale(data, TODAY);
-  ok("Example Company is 39 days unchecked in the stale view",
-    st.find((r) => r.app.id === "booz-allen").days === 39,
-    JSON.stringify(st.find((r) => r.app.id === "booz-allen")));
-  ok("to-apply records never show up as stale", !st.some((r) => r.app.status === "To apply"));
-  const due = T.upcoming(data, TODAY);
-  ok("NREIP is the next deadline", due[0].id === "nreip-application", due[0] && due[0].id);
-  ok("nothing in the seed is already overdue", !due.some((r) => r.overdue), JSON.stringify(due.filter((r) => r.overdue).map((r) => r.id)));
-}
-
 // ---------------------------------------------------------------------------
 group("Feature 2: the example data is usable");
 {
@@ -779,14 +711,9 @@ group("Feature 2: the example data is usable");
   ok("the example profile assembles and verifies",
     assemble(exProfile, parsePosting({ title: "Summer 2027 Red Team Intern", text: "Penetration testing and vulnerability research." })).ok);
 
-  // The point of redacting: no real personal values may survive in a committed file.
-  const blob = fs.readFileSync(path.join(root, "data/profile.example.json"), "utf8") +
-               fs.readFileSync(path.join(root, "tracker/data.example.json"), "utf8");
-  for (const needle of ["Casey", "Example Supervisor", "Example Org", "your campus", "Example Town", "Your City",
-                        "Example Street", "555-0100", "555-0101", "zaheensahmed", "Example Company",
-                        "Example Company", "Example Company", "REQ-00000", "EXAMPLE-ID"]) {
-    ok(`the committed example files do not contain "${needle}"`, !blob.includes(needle));
-  }
+  // Whether any real value leaked into a committed file is checked in
+  // test/seed.local.mjs, which is gitignored, because naming the values here
+  // would put them in the repo this check exists to keep them out of.
 }
 
 group("Feature 2: tracker stays local");
@@ -852,7 +779,7 @@ group("Feature 3: stage-1 verdicts");
   // SKIP: onsite and term-time and far.
   const farTermTime = triageCard(card({ startTerm: term("fall"), arrangement: "Onsite", location: "Seattle, WA" }));
   ok("onsite plus term-time plus far skips", farTermTime.verdict === "SKIP" && codes(farTermTime, "skip").includes("onsite_termtime_far"));
-  ok("that skip cites the eligibility filter", /school-year on-site role away from your campus/i.test(farTermTime.reasons.find((x) => x.code === "onsite_termtime_far").text));
+  ok("that skip cites the eligibility filter", /school-year on-site role away from campus/i.test(farTermTime.reasons.find((x) => x.code === "onsite_termtime_far").text));
 
   const farSummer = triageCard(card({ startTerm: term("summer"), arrangement: "Onsite", location: "Seattle, WA" }));
   ok("onsite and far but in summer does NOT skip, because summer relocation is fine",
@@ -983,10 +910,10 @@ group("Feature 3: rules and scanner hygiene");
   ok("rebuilt patterns still match real card text",
     new RegExp(JSON.parse(json).FIELD_PATTERNS.startTerm[0].source, "i").test("Start in 2027 Summer"));
 
-  ok("NEAR_your campus covers Baltimore and the DC area",
-    ["Your City, MD", "Arlington, VA", "Washington, DC", "Fort Meade, MD"].every((l) => JR.NEAR_your campus.some((re) => re.test(l))));
-  ok("NEAR_your campus excludes the far cases",
-    ["Seattle, WA", "Austin, TX", "New York, NY", "San Jose, CA"].every((l) => !JR.NEAR_your campus.some((re) => re.test(l))));
+  ok("NEAR_HOME covers Baltimore and the DC area",
+    ["Your City, MD", "Arlington, VA", "Washington, DC", "Fort Meade, MD"].every((l) => JR.NEAR_HOME.some((re) => re.test(l))));
+  ok("NEAR_HOME excludes the far cases",
+    ["Seattle, WA", "Austin, TX", "New York, NY", "San Jose, CA"].every((l) => !JR.NEAR_HOME.some((re) => re.test(l))));
   ok("summer is the only non-term-time season",
     JR.SUMMER_TERMS.length === 1 && JR.TERM_TIME_TERMS.length === 4 && !JR.TERM_TIME_TERMS.includes("summer"));
 
@@ -1300,7 +1227,7 @@ group("Feature 5: the tracker record a submission becomes");
     atsFromUrl("https://acme.wd1.myworkdayjobs.com/x") === "Workday");
   ok("an unknown host yields no ATS rather than a guess", atsFromUrl("https://acme.example/careers") === "");
   ok("a Jobright URL is not an ATS", atsFromUrl("https://jobright.ai/jobs/info/x") === "");
-  ok("slugify produces a stable id fragment", slugify("Example Company & Co") === "c-h-robinson-co");
+  ok("slugify produces a stable id fragment", slugify("A.B. Example & Co") === "a-b-example-co");
 
   const entry = {
     listingUrl: "https://jobright.ai/jobs/info/abc",
@@ -1718,6 +1645,18 @@ group("Silent failure fix: the UI cannot reintroduce the fallback");
   ok("the triage tab renders the board-level harvest report", /harvestReportHtml/.test(t));
   ok("the triage tab says harvest has not run when it has not", /Harvest has not run on this board/.test(t));
   ok("the triage tab states that REVIEW means not yet assessed", /REVIEW means not yet assessed/i.test(t));
+}
+
+// Assertions about real seeded content live outside the repo, so the committed
+// suite never names a real company, person or credential.
+const localTests = path.join(root, "test/seed.local.mjs");
+if (fs.existsSync(localTests)) {
+  const mod = await import(pathToFileURL(localTests).href);
+  await mod.run({ ok, skip, group, profile, root, fs, path, REAL_PROFILE, REAL_TRACKER,
+                  T: globalThis.JAF_TRACKER, assemble, parsePosting, checkEligibility });
+} else {
+  group("Local seed-content tests");
+  skip("test/seed.local.mjs", "not present. It is gitignored, so a clean clone has only the structural checks.");
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);
