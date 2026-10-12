@@ -14,6 +14,8 @@ import { buildAllowedSet, verifyOutput } from "../engine/verify.js";
 import { checkEligibility } from "../engine/eligibility.js";
 import { matchFields } from "../engine/matcher.js";
 import { normLabel } from "../engine/normalize.js";
+import { buildReport, reportToText, sectionText, SECTIONS, SECTION_TITLES } from "../engine/report.js";
+import { execFileSync } from "node:child_process";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const profile = JSON.parse(fs.readFileSync(path.join(root, "data/profile.json"), "utf8"));
@@ -346,6 +348,195 @@ group("Posting parsing");
   ok("a vague posting refuses to guess a role type", vague.roles.primary === null, vague.roles.reason);
   const a = assemble(profile, vague);
   ok("the assembler asks instead of assuming", a.needsRoleType === true && a.entries.length === 0);
+}
+
+
+// ---------------------------------------------------------------------------
+group("Feature 1: standalone report");
+{
+  const jd = `Summer 2027 Offensive Security Intern
+
+We are hiring an intern for our offensive security team. You will perform
+penetration testing and vulnerability research against embedded devices and
+reverse engineer firmware. The range is $22 - $28 per hour.
+
+Requirements:
+- Must be enrolled in a Bachelor's program
+- We prefer rising juniors or seniors
+- Minimum GPA of 3.0 required
+- Must have the ability to obtain a security clearance
+- Nice to have: Ghidra, Burp Suite, AWS`;
+
+  const r = buildReport(profile, jd);
+  ok("report carries posting, eligibility and assembled", Boolean(r.posting && r.eligibility && r.assembled));
+  ok("the title is taken from the first line", r.posting.title === "Summer 2027 Offensive Security Intern", r.posting.title);
+  ok("role type is inferred", r.assembled.roleType === "offensive / red team / RE / vuln research", r.assembled.roleType);
+  ok("assembled output verifies", r.assembled.ok && r.assembled.violations.length === 0);
+
+  for (const which of SECTIONS) {
+    const t = sectionText(r, profile, which);
+    ok(`section "${which}" renders non-empty text`, typeof t === "string" && t.trim().length > 0);
+  }
+
+  const full = reportToText(r, profile);
+  for (const which of SECTIONS) {
+    ok(`the full report includes the ${which} section`, full.includes(SECTION_TITLES[which]));
+  }
+
+  // The text renderer must not invent or reshape claim text. Every bullet line,
+  // with its list marker removed, has to be identity-equal to a profile claim.
+  const allowed = buildAllowedSet(profile);
+  const bulletLines = sectionText(r, profile, "bullets")
+    .split("\n")
+    .filter((l) => l.startsWith("- "))
+    .map((l) => l.slice(2));
+  ok("every bullet line in the text output is verbatim profile text",
+    bulletLines.length > 0 && bulletLines.every((l) => allowed.byText.has(l)),
+    bulletLines.filter((l) => !allowed.byText.has(l)).join(" | "));
+  ok("every skill in the text output is verbatim profile text",
+    sectionText(r, profile, "skills").split("\n")[0].split(", ").every((s) => allowed.skills.has(s)));
+  ok("no em-dash reaches the rendered report", !/[—–]/.test(full));
+
+  // The institution-restriction false positive this feature surfaced.
+  ok("a degree requirement is not read as an institution restriction",
+    !r.eligibility.blocked,
+    JSON.stringify(r.eligibility.blockers.map((b) => b.id)));
+  ok("the degree requirement is explicitly cleared, not ignored",
+    r.eligibility.cleared.some((c) => c.id === "institution_restriction"));
+
+  // Quoting a bullet list must quote one bullet, not run them together.
+  const gpaFlag = r.eligibility.flags.find((f) => f.id === "gpa_floor");
+  ok("a bullet is quoted on its own", gpaFlag && gpaFlag.sentence === "Minimum GPA of 3.0 required", gpaFlag && gpaFlag.sentence);
+  const juniorFlag = r.eligibility.flags.find((f) => f.id === "rising_junior_senior");
+  ok("each flag quotes only its own bullet", juniorFlag && juniorFlag.sentence === "We prefer rising juniors or seniors", juniorFlag && juniorFlag.sentence);
+
+  // A real institution restriction still blocks.
+  const consortium = buildReport(profile, "Intern role. ".repeat(20) + "\nApplicants must be enrolled at a participating consortium institution in southwest Virginia.");
+  ok("a consortium restriction still blocks", consortium.eligibility.blocked);
+
+  // A blocked posting assembles nothing by default, but still reports.
+  const blockedReport = buildReport(profile, "Security Intern. ".repeat(20) + "\nApplicants must currently hold an active TS/SCI clearance.");
+  ok("a blocked posting is reported as blocked", blockedReport.eligibility.blocked);
+  ok("the blocked report still names the blocker in its text",
+    sectionText(blockedReport, profile, "eligibility").includes("HARD BLOCKER"));
+
+  // Role override.
+  const overridden = buildReport(profile, jd, { roleTypeOverride: "AI / LLM security" });
+  ok("a role override is honoured", overridden.assembled.roleType === "AI / LLM security");
+  ok("an override changes which entry leads",
+    overridden.assembled.entries.find((e) => e.isLead).entryId === "receipts",
+    overridden.assembled.entries.find((e) => e.isLead).entryId);
+
+  // Skill limit.
+  ok("the skill limit is respected", buildReport(profile, jd, { skillLimit: 4 }).assembled.skills.length === 4);
+
+  // Thin input.
+  const thin = buildReport(profile, "Intern wanted.");
+  ok("thin text reports insufficient text rather than clearing", thin.eligibility.insufficientText);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 1: the paste path touches no page");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+
+  // engine/ and the paste tab may not reach a page or inject anything.
+  const pageReach = [/chrome\.scripting/, /executeScript/, /chrome\.tabs/, /document\.querySelector/];
+  const engineFiles = fs.readdirSync(path.join(root, "engine")).map((f) => "engine/" + f);
+  for (const file of [...engineFiles, "popup/tab-paste.js", "engine/report.js", "cli.mjs"]) {
+    const code = stripComments(fs.readFileSync(path.join(root, file), "utf8"));
+    for (const re of pageReach) {
+      ok(`${file} does not use ${re.source}`, !re.test(code));
+    }
+  }
+  for (const file of engineFiles) {
+    const code = stripComments(fs.readFileSync(path.join(root, file), "utf8"));
+    ok(`${file} does not reference chrome.*`, !/\bchrome\./.test(code));
+    ok(`${file} does not reference document`, !/\bdocument\b/.test(code));
+    ok(`${file} makes no network request`, !/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(code));
+  }
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 1: cli.mjs");
+{
+  const tmp = path.join(root, "test", ".cli-fixture.txt");
+  fs.writeFileSync(tmp, `AI Security Intern, Summer 2027
+
+Work on LLM safety and prompt injection defense for large language model
+deployments. Data privacy and PII handling.
+
+Requirements:
+- Must be enrolled in a Bachelor's program
+- Experience with AWS and Kubernetes preferred`);
+
+  const runCli = (args) => {
+    try {
+      return { out: execFileSync("node", [path.join(root, "cli.mjs"), ...args], { encoding: "utf8" }), code: 0 };
+    } catch (err) {
+      return { out: (err.stdout || "") + (err.stderr || ""), code: err.status };
+    }
+  };
+
+  const a = runCli([tmp]);
+  ok("cli exits 0 on a viable posting", a.code === 0, `exit ${a.code}`);
+  ok("cli prints every section", SECTIONS.every((w) => a.out.includes(SECTION_TITLES[w])));
+  ok("cli infers the AI role type", /Role type: AI \/ LLM security/.test(a.out), a.out.split("\n").find((l) => l.startsWith("Role type:")));
+  ok("cli reports the AWS gap", /aws/.test(a.out.split("Gaps")[1] || ""));
+  ok("cli output matches the module output exactly",
+    a.out === reportToText(buildReport(profile, fs.readFileSync(tmp, "utf8")), profile));
+
+  const b = runCli([tmp, "--role", "embedded / hardware / systems"]);
+  ok("cli honours --role", /Role type: embedded \/ hardware \/ systems/.test(b.out));
+
+  const c = runCli([tmp, "--role", "nonsense"]);
+  ok("cli rejects an unknown role type", c.code === 1 && /Unknown role type/.test(c.out), `exit ${c.code}`);
+
+  const d = runCli(["--help"]);
+  ok("cli --help lists the real role types", d.code === 0 && d.out.includes("GRC / risk / audit / banking"));
+
+  const blocked = path.join(root, "test", ".cli-blocked.txt");
+  fs.writeFileSync(blocked, "Intern role at our agency. ".repeat(20) + "\nApplicants must currently hold an active TS/SCI clearance.");
+  const e = runCli([blocked]);
+  ok("cli exits 2 when blocked", e.code === 2, `exit ${e.code}`);
+
+  const f = runCli([path.join(root, "test", "does-not-exist.txt")]);
+  ok("cli fails cleanly on a missing file", f.code === 1 && /Could not read/.test(f.out));
+
+  fs.unlinkSync(tmp);
+  fs.unlinkSync(blocked);
+}
+
+// ---------------------------------------------------------------------------
+group("Feature 1: popup wiring");
+{
+  const html = fs.readFileSync(path.join(root, "popup/popup.html"), "utf8");
+  const htmlIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+
+  // Ids created at render time, inside innerHTML, rather than present in the
+  // static markup.
+  const dynamic = new Set(["override", "role-select", "paste-override", "paste-role-select"]);
+
+  const popupFiles = fs.readdirSync(path.join(root, "popup")).filter((f) => f.endsWith(".js"));
+  const missing = [];
+  for (const file of popupFiles) {
+    const src = fs.readFileSync(path.join(root, "popup", file), "utf8");
+    for (const m of src.matchAll(/\$\("([a-z0-9-]+)"\)/g)) {
+      const id = m[1];
+      if (!htmlIds.has(id) && !dynamic.has(id)) missing.push(`${file}: ${id}`);
+    }
+  }
+  ok("every element the popup looks up exists in popup.html", missing.length === 0, missing.join(", "));
+
+  // Sections the page tab shows and hides by id.
+  const pageSrc = fs.readFileSync(path.join(root, "popup/tab-page.js"), "utf8");
+  const shown = [...pageSrc.matchAll(/show\("(sec-[a-z-]+)"/g)].map((m) => m[1]);
+  const missingSections = shown.filter((id) => !htmlIds.has(id));
+  ok("every section the page tab toggles exists", missingSections.length === 0, missingSections.join(", "));
+
+  ok("the popup declares both tabs", /data-tab="page"/.test(html) && /data-tab="paste"/.test(html));
+  ok("the paste panel exists", htmlIds.has("panel-paste") && htmlIds.has("panel-page"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

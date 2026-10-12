@@ -76,3 +76,25 @@ code { background: var(--chip); padding: 1px 4px; border-radius: 3px; font-size:
   .banner.amber { background: #451a03; border-color: #78350f; color: #fde68a; }
   .banner.blue { background: #172554; border-color: #1e3a8a; color: #bfdbfe; }
 }
+
+/* ------------------------------------------------------------------ tabs */
+.tabs {
+  position: sticky; top: 36px; z-index: 2; background: var(--bg);
+  display: flex; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line);
+}
+.tabs button {
+  flex: 1; background: transparent; border: 1px solid transparent;
+  color: var(--muted); font-size: 12px; padding: 4px 8px;
+}
+.tabs button.active { background: var(--chip); border-color: var(--line); color: var(--fg); font-weight: 600; }
+.panel > section:last-of-type { border-bottom: none; }
+.subhead {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  margin: 14px 0 6px; display: flex; align-items: center; gap: 8px;
+}
+button.ghost { background: transparent; color: var(--muted); font-size: 11px; padding: 1px 6px; }
+button.ghost:hover { background: var(--chip); color: var(--fg); }
+table.scores { margin-top: 6px; font-size: 11px; color: var(--muted); border-collapse: collapse; }
+table.scores td { padding: 0 6px 0 0; }
+table.scores td:first-child { text-align: right; font-variant-numeric: tabular-nums; }
+.merge { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }

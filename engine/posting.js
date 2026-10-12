@@ -1,12 +1,15 @@
 // engine/posting.js -- PURE. Turns raw job-description text into the few
 // structured facts the rest of the engine needs.
 import { ROLE_KEYWORDS, TITLE_MULTIPLIER, SECONDARY_THRESHOLD, MIN_CONFIDENT_SCORE, REQUIREMENT_TERMS } from "../rules/role-rules.js";
-import { squash, termsOf } from "./normalize.js";
+import { squash, squashLines, termsOf } from "./normalize.js";
 
 const MAX_TEXT = 40000;
 
 export function parsePosting({ text = "", title = "", host = "" } = {}) {
-  const body = squash(text).slice(0, MAX_TEXT);
+  // Line breaks are preserved. A posting's requirements are usually a bullet
+  // list, and collapsing it to one line makes every quoted blocker run into the
+  // next bullet.
+  const body = squashLines(text).slice(0, MAX_TEXT);
   const head = squash(title);
   const haystack = (head + " \n " + body).toLowerCase();
 

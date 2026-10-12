@@ -13,10 +13,10 @@ export const HARD_DETECTORS = [
     confidence: "high",
     find: [
       /\bclass of (?:20\d{2})(?:\s*(?:,|and|or|-|through|to)\s*20\d{2})*/gi,
-      /\bgraduat\w*\s+(?:between|in|by|before|no later than|on or before)\s+[^.;]{0,60}/gi,
+      /\bgraduat\w*\s+(?:between|in|by|before|no later than|on or before)\s+[^.;\n]{0,60}/gi,
       /\b20\d{2}\s+graduat\w+/gi,
-      /\bexpected graduation(?:\s+date)?\s*(?:of|in|:)?\s*[^.;]{0,40}/gi,
-      /\bmust graduate\s+[^.;]{0,60}/gi
+      /\bexpected graduation(?:\s+date)?\s*(?:of|in|:)?\s*[^.;\n]{0,40}/gi,
+      /\bmust graduate\s+[^.;\n]{0,60}/gi
     ],
     judge(matchText, profile) {
       const years = [...matchText.matchAll(/\b(20\d{2})\b/g)].map((m) => Number(m[1]));
@@ -40,10 +40,10 @@ export const HARD_DETECTORS = [
     filter: "Active clearance required at application",
     confidence: "high",
     find: [
-      /\b(?:must|required to)\s+(?:currently\s+)?(?:hold|possess|have|maintain)\b[^.;]{0,80}clearance[^.;]{0,40}/gi,
-      /\bactive\s+(?:ts\/sci|top secret|secret|dod|security)\s*(?:clearance)?[^.;]{0,40}/gi,
-      /\bcurrent\s+(?:ts\/sci|top secret|secret)\s+clearance[^.;]{0,40}/gi,
-      /\bclearance\s+(?:is\s+)?required\s+(?:at|prior to|before)\s+[^.;]{0,40}/gi
+      /\b(?:must|required to)\s+(?:currently\s+)?(?:hold|possess|have|maintain)\b[^.;\n]{0,80}clearance[^.;\n]{0,40}/gi,
+      /\bactive\s+(?:ts\/sci|top secret|secret|dod|security)\s*(?:clearance)?[^.;\n]{0,40}/gi,
+      /\bcurrent\s+(?:ts\/sci|top secret|secret)\s+clearance[^.;\n]{0,40}/gi,
+      /\bclearance\s+(?:is\s+)?required\s+(?:at|prior to|before)\s+[^.;\n]{0,40}/gi
     ],
     judge(matchText, profile) {
       // "ability to obtain" is not a blocker: clearance_eligible is Yes.
@@ -64,22 +64,39 @@ export const HARD_DETECTORS = [
     filter: "Institution restrictions (e.g. SWVA consortium - blocked VPT)",
     confidence: "low",
     find: [
-      /\bmust be (?:currently )?enrolled (?:at|in)\s+[^.;]{0,80}/gi,
-      /\b(?:students?|applicants?)\s+(?:from|at|attending)\s+(?:the\s+)?(?:following|participating|partner|member)\s+[^.;]{0,80}/gi,
-      /\bconsortium\b[^.;]{0,80}/gi,
+      /\bmust be (?:currently )?enrolled (?:at|in)\s+[^.;\n]{0,80}/gi,
+      /\b(?:students?|applicants?)\s+(?:from|at|attending)\s+(?:the\s+)?(?:following|participating|partner|member)\s+[^.;\n]{0,80}/gi,
+      /\bconsortium\b[^.;\n]{0,80}/gi,
       // Anchored on an institution preposition so graduation-window wording
       // like "open to students graduating between 2028 and 2030" does not hit.
-      /\b(?:open|limited|restricted|available)\s+(?:only\s+)?to\s+students?\s+(?:at|from|attending|enrolled (?:at|in))\s+[^.;]{0,80}/gi,
-      /\bpartner (?:school|university|institution)s?\b[^.;]{0,60}/gi
+      /\b(?:open|limited|restricted|available)\s+(?:only\s+)?to\s+students?\s+(?:at|from|attending|enrolled (?:at|in))\s+[^.;\n]{0,80}/gi,
+      /\bpartner (?:school|university|institution)s?\b[^.;\n]{0,60}/gi
     ],
     judge(matchText, profile) {
       const school = profile.education.current_school;
-      if (new RegExp("your campus|your school", "i").test(matchText)) {
+      if (/your campus|your school/i.test(matchText)) {
         return { verdict: "ok", why: `Names your school (${school}).` };
       }
+      // "must be enrolled at a participating consortium school" restricts by
+      // institution. "must be enrolled in a Bachelor's program" does not.
+      const specific = /\bconsortium\b|\bparticipating\b|\bpartner\b|\bthe following\b|\bmember (?:school|institution|universit)/i;
+      const generic = /\b(?:bachelor|master|undergraduate|graduate|doctoral|associate|degree|program|course|accredited|four[- ]year|two[- ]year|college or university|university or college|an? (?:accredited )?(?:college|university|institution|school))\b/i;
+
+      if (specific.test(matchText)) {
+        return {
+          verdict: "blocked",
+          why: `Restricts applicants to specific institutions and does not name ${school} in the matched text. Read the full posting before trusting this.`
+        };
+      }
+      if (generic.test(matchText)) {
+        return {
+          verdict: "ok",
+          why: "A general enrollment or degree requirement, not an institution restriction. You are enrolled in a Bachelor of Science program."
+        };
+      }
       return {
-        verdict: "blocked",
-        why: `Restricts applicants by institution and does not name ${school} in the matched text. Read the full posting before trusting this.`
+        verdict: "unclear",
+        why: `Names an enrollment requirement that is neither clearly generic nor clearly a consortium. Read it yourself. Your school is ${school}.`
       };
     }
   },
@@ -88,9 +105,9 @@ export const HARD_DETECTORS = [
     filter: "School-year on-site role away from your campus",
     confidence: "low",
     find: [
-      /\b(?:fall|spring|academic year|school year)\s+(?:20\d{2}\s+)?(?:internship|co-?op|term|semester)[^.;]{0,60}/gi,
-      /\b(?:part[- ]time\s+)?during the (?:school|academic) year[^.;]{0,60}/gi,
-      /\b(?:fall|spring)\s+20\d{2}\s+(?:start|cohort)[^.;]{0,40}/gi
+      /\b(?:fall|spring|academic year|school year)\s+(?:20\d{2}\s+)?(?:internship|co-?op|term|semester)[^.;\n]{0,60}/gi,
+      /\b(?:part[- ]time\s+)?during the (?:school|academic) year[^.;\n]{0,60}/gi,
+      /\b(?:fall|spring)\s+20\d{2}\s+(?:start|cohort)[^.;\n]{0,40}/gi
     ],
     judge(matchText, profile, posting) {
       const onsite = /\bon[- ]?site\b|\bin[- ]office\b|\bin person\b|\bhybrid\b/i.test(posting.text);
@@ -111,13 +128,13 @@ export const SOFT_DETECTORS = [
   {
     id: "rising_junior_senior",
     filter: "'Rising junior or senior preferred' - argue junior standing by credits",
-    find: [/\brising (?:junior|senior)s?\b[^.;]{0,60}/gi, /\b(?:junior|senior)s?\s+(?:and|or)\s+(?:senior|junior)s?\s+(?:only|preferred)[^.;]{0,40}/gi],
+    find: [/\brising (?:junior|senior)s?\b[^.;\n]{0,60}/gi, /\b(?:junior|senior)s?\s+(?:and|or)\s+(?:senior|junior)s?\s+(?:only|preferred)[^.;\n]{0,40}/gi],
     argue: (p) => `${p.education.class_year_explanation} Standing from fall 2027 is ${p.education.class_standing_fall_2027}.`
   },
   {
     id: "penultimate_final",
     filter: "'Penultimate or final year' - qualifies; 2027-28 is penultimate on a three-year path",
-    find: [/\bpenultimate\b[^.;]{0,60}/gi, /\bfinal year\b[^.;]{0,60}/gi, /\blast year of (?:your )?(?:degree|study|program)\b[^.;]{0,40}/gi],
+    find: [/\bpenultimate\b[^.;\n]{0,60}/gi, /\bfinal year\b[^.;\n]{0,60}/gi, /\blast year of (?:your )?(?:degree|study|program)\b[^.;\n]{0,40}/gi],
     argue: (p) => `Qualifies. Penultimate year is ${p.education.penultimate_year}, final year ${p.education.final_year}.`
   },
   {

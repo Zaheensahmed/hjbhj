@@ -123,6 +123,39 @@ popup shows both.
 Nothing typed into a password or file field is stored, and values shaped like an
 SSN or a card number are refused rather than written to disk.
 
+## Standalone assembler
+
+The popup has two tabs. **Paste a posting** takes a job description, runs the
+engine over it and reports, with a copy button per section:
+
+- eligibility, each finding quoting the sentence it matched plus the
+  counter-argument from your profile
+- inferred role type with every score, the keywords that matched, and a manual
+  override
+- resume bullets per entry with their claim IDs
+- the filtered skills list, comma-separated
+- gaps
+- merge candidates
+
+This path imports `engine/` and reads the textarea. Nothing else. It never calls
+`chrome.scripting`, never reads a page, and the test suite greps `engine/`,
+`engine/report.js`, `popup/tab-paste.js` and `cli.mjs` to keep that true, so it
+keeps working when anything to do with page scanning breaks.
+
+The same report on the command line:
+
+```bash
+node cli.mjs path/to/jd.txt
+node cli.mjs path/to/jd.txt --role "AI / LLM security"
+node cli.mjs path/to/jd.txt --skills 15
+cat jd.txt | node cli.mjs -
+node cli.mjs --help          # lists the role types
+```
+
+Exit code 0 is viable, 2 means a hard blocker or a refused output, 1 is a usage
+error. The suite asserts the CLI output is byte-identical to what the popup
+renders.
+
 ## The assembler
 
 Claims and skills are pools of individually true statements, each tagged. The

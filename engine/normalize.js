@@ -5,6 +5,20 @@ export function squash(s) {
   return String(s ?? "").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Collapse runs of spaces and tabs but keep single newlines, so a bullet list
+ * stays a bullet list. Blank-line runs collapse to one.
+ */
+export function squashLines(s) {
+  return String(s ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** Label text as the matcher sees it. */
 export function normLabel(s) {
   let t = squash(s);

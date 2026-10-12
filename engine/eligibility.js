@@ -6,11 +6,23 @@
 import { HARD_DETECTORS, SOFT_DETECTORS } from "../rules/eligibility-rules.js";
 import { squash } from "./normalize.js";
 
+/**
+ * The smallest readable unit around a match. A newline is as strong a boundary
+ * as a full stop, because requirements usually arrive as bullets, and "3.0" is
+ * not the end of a sentence.
+ */
 function sentenceAround(text, index, len) {
-  const start = Math.max(0, text.lastIndexOf(".", index - 1) + 1);
-  let end = text.indexOf(".", index + len);
-  if (end === -1) end = Math.min(text.length, index + len + 160);
-  return squash(text.slice(start, end + 1)).slice(0, 320);
+  const isBoundary = (i) => {
+    const c = text[i];
+    if (c === "\n") return true;
+    if (c !== ".") return false;
+    return !/\d/.test(text[i + 1] || " ") || !/\d/.test(text[i - 1] || " ");
+  };
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) if (isBoundary(i)) { start = i + 1; break; }
+  let end = text.length - 1;
+  for (let i = index + len; i < text.length; i++) if (isBoundary(i)) { end = i; break; }
+  return squash(text.slice(start, end + 1)).replace(/^[-*\u2022\s]+/, "").slice(0, 320);
 }
 
 function runFinders(detector, text) {

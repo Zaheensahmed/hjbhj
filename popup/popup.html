@@ -11,68 +11,92 @@
     <span id="ats" class="pill"></span>
   </header>
 
+  <nav class="tabs" id="tabs">
+    <button data-tab="page" class="active">This page</button>
+    <button data-tab="paste">Paste a posting</button>
+  </nav>
+
   <div id="status" class="status">Scanning the page.</div>
 
-  <section id="sec-eligibility" hidden>
-    <h2>Eligibility</h2>
-    <div id="eligibility"></div>
-  </section>
+  <!-- ------------------------------------------------------- page tab -->
+  <div class="panel" id="panel-page">
+    <section id="sec-eligibility" hidden>
+      <h2>Eligibility</h2>
+      <div id="eligibility"></div>
+    </section>
 
-  <section id="sec-uploads" hidden>
-    <h2>Upload manually <span id="uploads-count" class="count"></span></h2>
-    <p class="note">JavaScript cannot put a file into a file input. These will stay empty until you attach them yourself.</p>
-    <div id="uploads"></div>
-  </section>
+    <section id="sec-uploads" hidden>
+      <h2>Upload manually <span id="uploads-count" class="count"></span></h2>
+      <p class="note">JavaScript cannot put a file into a file input. These will stay empty until you attach them yourself.</p>
+      <div id="uploads"></div>
+    </section>
 
-  <section id="sec-role" hidden>
-    <h2>Posting</h2>
-    <div id="role"></div>
-    <label class="inline" for="jd">Job description text the scan found</label>
-    <textarea id="jd" rows="4" spellcheck="false"></textarea>
+    <section id="sec-role" hidden>
+      <h2>Posting</h2>
+      <div id="role"></div>
+      <label class="inline" for="jd">Job description text the scan found</label>
+      <textarea id="jd" rows="4" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="rescan" class="primary">Use this text and redo</button>
+        <label class="check"><input type="checkbox" id="generic-org"> Generic org names</label>
+      </div>
+    </section>
+
+    <section id="sec-unknown" hidden>
+      <h2>Unknown <span id="unknown-count" class="count"></span></h2>
+      <p class="note">Answer one and it is saved against this question for next time.</p>
+      <div id="unknown"></div>
+    </section>
+
+    <section id="sec-manual" hidden>
+      <h2>Your call <span id="manual-count" class="count"></span></h2>
+      <div id="manual"></div>
+    </section>
+
+    <section id="sec-eeo" hidden>
+      <h2>EEO <span id="eeo-count" class="count"></span></h2>
+      <p class="note" id="eeo-note"></p>
+      <div id="eeo"></div>
+    </section>
+
+    <section id="sec-conflicts" hidden>
+      <h2>Disagreements <span id="conflicts-count" class="count"></span></h2>
+      <p class="note">A saved answer and a profile rule want different things here.</p>
+      <div id="conflicts"></div>
+    </section>
+
+    <section id="sec-review" hidden>
+      <h2>Verify these <span id="review-count" class="count"></span></h2>
+      <p class="note">Filled from a weaker signal. Worth a look before you submit.</p>
+      <div id="review"></div>
+    </section>
+
+    <section id="sec-filled" hidden>
+      <h2>Filled <span id="filled-count" class="count"></span></h2>
+      <div id="filled"></div>
+    </section>
+
+    <section id="sec-assembled" hidden>
+      <h2>Assembled</h2>
+      <div id="assembled"></div>
+    </section>
+  </div>
+
+  <!-- ------------------------------------------------------ paste tab -->
+  <div class="panel" id="panel-paste" hidden>
+    <p class="note">Paste a job description. This tab reads the profile and your text only. It never touches a page and never injects anything.</p>
+    <textarea id="paste-jd" rows="7" spellcheck="false" placeholder="Paste the whole posting, title and requirements included."></textarea>
     <div class="row">
-      <button id="rescan" class="primary">Use this text and redo</button>
-      <label class="check"><input type="checkbox" id="generic-org"> Generic org names</label>
+      <button id="paste-run" class="primary">Run</button>
+      <button id="paste-clear">Clear</button>
+      <label class="check">skills <input type="number" id="paste-skills" value="10" min="1" max="40" style="width:52px"></label>
     </div>
-  </section>
-
-  <section id="sec-unknown" hidden>
-    <h2>Unknown <span id="unknown-count" class="count"></span></h2>
-    <p class="note">Answer one and it is saved against this question for next time.</p>
-    <div id="unknown"></div>
-  </section>
-
-  <section id="sec-manual" hidden>
-    <h2>Your call <span id="manual-count" class="count"></span></h2>
-    <div id="manual"></div>
-  </section>
-
-  <section id="sec-eeo" hidden>
-    <h2>EEO <span id="eeo-count" class="count"></span></h2>
-    <p class="note" id="eeo-note"></p>
-    <div id="eeo"></div>
-  </section>
-
-  <section id="sec-conflicts" hidden>
-    <h2>Disagreements <span id="conflicts-count" class="count"></span></h2>
-    <p class="note">A saved answer and a profile rule want different things here.</p>
-    <div id="conflicts"></div>
-  </section>
-
-  <section id="sec-review" hidden>
-    <h2>Verify these <span id="review-count" class="count"></span></h2>
-    <p class="note">Filled from a weaker signal. Worth a look before you submit.</p>
-    <div id="review"></div>
-  </section>
-
-  <section id="sec-filled" hidden>
-    <h2>Filled <span id="filled-count" class="count"></span></h2>
-    <div id="filled"></div>
-  </section>
-
-  <section id="sec-assembled" hidden>
-    <h2>Assembled</h2>
-    <div id="assembled"></div>
-  </section>
+    <p class="note">Cmd-Enter or Ctrl-Enter also runs it.</p>
+    <div class="row" id="paste-actions" hidden>
+      <button id="paste-copy-all">Copy the whole report</button>
+    </div>
+    <div id="paste-out"></div>
+  </div>
 
   <footer>
     <span class="never">This extension never clicks submit.</span>
