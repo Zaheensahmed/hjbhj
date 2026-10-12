@@ -4,12 +4,13 @@
 // and ranks. Stage 1 has no job description text, so the best verdict available
 // is REVIEW. Nothing here clicks anything on the page except a scroll-into-view.
 
-import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, getHarvestProgress } from "../shared/store.js";
+import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, getHarvestProgress, getPrefs, setPrefs } from "../shared/store.js";
 import { toPlain, HARVEST } from "../rules/jobright-rules.js";
 import { triageAll } from "../engine/triage.js";
+import { boardReport } from "../engine/assess.js";
 import { $, esc, show, wireCopyText, flash } from "./ui.js";
 
-const state = { tabId: null, scan: null, store: null, result: null, showDismissed: false };
+const state = { tabId: null, scan: null, store: null, result: null, report: null, prefs: {}, showDismissed: false };
 
 export function initTriageTab({ tabId }) {
   state.tabId = tabId;
@@ -20,6 +21,13 @@ export function initTriageTab({ tabId }) {
     await setHarvestStop(true);
     $("tri-harvest-status").textContent = "Stop requested. The loop finishes the card it is on, keeps everything already read, and ends.";
   };
+  $("tri-auto-queue").onchange = async (ev) => {
+    state.prefs = { ...state.prefs, autoQueue: ev.target.checked };
+    await setPrefs(state.prefs);
+    await syncAutoQueue();
+    render();
+  };
+  $("tri-queue-apply").onclick = async () => { await syncAutoQueue(true); render(); };
   pollProgress();
 }
 
@@ -55,9 +63,46 @@ export async function runTriage() {
   }
   state.scan = scan;
   state.store = await getTriage();
+  state.prefs = await getPrefs();
+  $("tri-auto-queue").checked = state.prefs.autoQueue !== false;
   state.result = triageAll(scan.cards, state.store);
   show("tri-harvest", scan.cards.length > 0);
+  await syncAutoQueue();
   render();
+}
+
+/**
+ * Auto-queue adds APPLY rows and nothing else. A REVIEW row means not yet
+ * assessed, so it can never be queued, and nothing is queued at all while a
+ * critical alarm stands.
+ */
+async function syncAutoQueue(force = false) {
+  if (!state.result) return;
+  state.report = buildReport();
+  if (!force && state.prefs.autoQueue === false) return;
+  if (!state.report.safeToQueue) return;
+
+  for (const a of state.report.assessed) {
+    if (!a.queueEligible) continue;
+    const url = a.row.card.listingUrl;
+    if (!url || state.store.shortlist[url]) continue;
+    state.store = await setShortlisted(url, {
+      title: a.row.card.title, company: a.row.card.company, listingUrl: url,
+      verdict: a.verdict, referralLead: a.row.referralLead,
+      destinationUrl: a.state.destinationUrl
+    }, true);
+  }
+  state.result = triageAll(state.scan.cards, state.store);
+  state.report = buildReport();
+}
+
+function buildReport() {
+  return boardReport({
+    rows: state.result.rows,
+    harvestedByUrl: state.store.harvested || {},
+    run: state.store.run,
+    boardUrl: state.scan ? state.scan.url : null
+  });
 }
 
 // -------------------------------------------------------------- stage 2
@@ -93,6 +138,13 @@ async function startHarvest() {
   call("harvest", { rules: toPlain(), cardIds: rows.map((r) => r.card.cardId), urlByCardId })
     .catch((err) => { $("tri-harvest-status").textContent = `Harvest could not start: ${err && err.message ? err.message : err}`; });
 
+  $("tri-auto-queue").onchange = async (ev) => {
+    state.prefs = { ...state.prefs, autoQueue: ev.target.checked };
+    await setPrefs(state.prefs);
+    await syncAutoQueue();
+    render();
+  };
+  $("tri-queue-apply").onclick = async () => { await syncAutoQueue(true); render(); };
   pollProgress();
 }
 
@@ -110,6 +162,13 @@ async function pollProgress() {
   $("tri-harvest-status").textContent = bits.join(", ") + ".";
 
   if (running) setTimeout(pollProgress, 2000);
+  else if (state.result) {
+    // The run is over: re-read what it stored, re-assess, then auto-queue.
+    state.store = await getTriage();
+    state.result = triageAll(state.scan.cards, state.store);
+    await syncAutoQueue();
+    render();
+  }
 }
 
 function render() {
@@ -132,10 +191,14 @@ function render() {
   }
   notes.push(`<div class="banner blue">Stage 1 reads structured fields only. There is no job description text yet, so graduation windows and institution restrictions are unchecked and nothing here can say apply. <strong>REVIEW is the ceiling.</strong></div>`);
 
-  const body = rows.map((r, i) => rowHtml(r, i)).join("");
+  if (!state.report) state.report = buildReport();
+  const report = state.report;
+  const assessedByUrl = new Map(report.assessed.map((a) => [a.row.card.listingUrl, a]));
+
+  const body = rows.map((r, i) => rowHtml(r, i, assessedByUrl.get(r.card.listingUrl))).join("");
   const dismissedUrls = Object.keys(state.store.dismissed);
 
-  $("tri-out").innerHTML = notes.join("") + (rows.length ? `
+  $("tri-out").innerHTML = notes.join("") + harvestReportHtml(report) + (rows.length ? `
     <table class="triage">
       <thead><tr>
         <th style="width:26px"></th><th style="width:58px">Verdict</th><th>Role</th>
@@ -153,14 +216,58 @@ function render() {
   wire();
 }
 
-function rowHtml(r, i) {
+/** The three steps that can fail, per card, as a traffic light. */
+function stepsHtml(a) {
+  if (!a) return "";
+  const st = a.state;
+  const dot = (ok, label, title) =>
+    `<span class="step ${ok === null ? "s-none" : ok ? "s-ok" : "s-bad"}" title="${esc(title)}">${ok === null ? "\u2013" : ok ? "\u2713" : "\u2717"} ${esc(label)}</span>`;
+
+  if (!st.attempted) return `<div class="steps"><span class="step s-none" title="The detail panel has never been read for this card.">not harvested</span></div>`;
+
+  return `<div class="steps">
+    ${dot(st.panelOpened, "panel", st.panelOpened ? "The detail panel opened and rendered." : `Panel did not open: ${st.failureReason}`)}
+    ${dot(st.requiredFound, "required", st.requiredFound ? `${st.requiredCount} requirement lines found via the ${st.requiredFrom}.` : "No Required list was found in the panel, so eligibility tested nothing.")}
+    ${dot(st.originalPostFound, "orig link", st.originalPostFound ? "An Original Job Post link was found." : "No Original Job Post link was found in the panel.")}
+    ${dot(Boolean(st.destinationUrl), "destination", st.destinationUrl ? st.destinationUrl : "No href off jobright.ai. A jobright.ai URL is not a destination.")}
+  </div>`;
+}
+
+function harvestReportHtml(report) {
+  const c = report.counts;
+  const alarms = report.alarms.map((a) => `<div class="banner ${a.severity === "critical" ? "red" : "amber"}"><strong>${a.severity === "critical" ? "Harvest is broken." : "Check this."}</strong> ${esc(a.text)}</div>`).join("");
+
+  if (!report.ran && c.attempted === 0) {
+    return alarms + `<div class="banner amber"><strong>Harvest has not run on this board.</strong> Every row below is stage 1 only: the card's own fields, no requirement text and no destination. Nothing can be queued from that.</div>`;
+  }
+
+  return alarms + `<div class="card ${report.safeToQueue ? "" : "red"}">
+    <div><strong>Harvest state for this board</strong></div>
+    <div class="meta">${report.ran ? `ran ${esc(report.startedAt || "")}${report.finishedAt ? `, finished ${esc(report.finishedAt)}` : ", still running"}` : "no run recorded in this session"}${report.stoppedEarly ? ` &middot; ended early: ${esc(report.stopReason || "")}` : ""}</div>
+    <table class="steps-table">
+      <tr><td>cards on board</td><td>${c.cardsOnBoard}</td><td></td></tr>
+      <tr><td>harvest attempted</td><td>${c.attempted}</td><td class="sub">${c.panelFailed} failed</td></tr>
+      <tr class="${c.panelOpened ? "" : "bad"}"><td>detail panel opened</td><td>${c.panelOpened}</td><td class="sub">of ${c.attempted}</td></tr>
+      <tr class="${c.requiredFound ? "" : "bad"}"><td>Required text found</td><td>${c.requiredFound}</td><td class="sub">of ${c.panelOpened}${c.requiredFromFallback ? `, ${c.requiredFromFallback} via the Qualification block` : ""}</td></tr>
+      <tr class="${c.originalPostFound ? "" : "bad"}"><td>Original Job Post link found</td><td>${c.originalPostFound}</td><td class="sub">of ${c.panelOpened}</td></tr>
+      <tr class="${c.destinationResolved ? "" : "bad"}"><td>destination off jobright.ai</td><td>${c.destinationResolved}</td><td class="sub">of ${c.originalPostFound}</td></tr>
+      <tr><td>blocked on real requirements</td><td>${c.blocked}</td><td></td></tr>
+      <tr><td><strong>queue eligible</strong></td><td><strong>${c.queueEligible}</strong></td><td class="sub">APPLY ${c.apply} &middot; REVIEW ${c.review} &middot; SKIP ${c.skip}</td></tr>
+    </table>
+    <div class="why">REVIEW means not yet assessed. Only APPLY rows can be queued.</div>
+  </div>`;
+}
+
+function rowHtml(r, i, a) {
   const c = r.card;
-  const skip = r.verdict === "SKIP";
+  const verdict = a ? a.verdict : r.verdict;
+  const skip = verdict === "SKIP";
   const reasons = r.reasons.filter((x) => x.kind !== "verdict");
+  const cls = verdict === "APPLY" ? "v-apply" : verdict === "SKIP" ? "v-skip" : "v-review";
 
   return `<tr class="${skip ? "skip" : ""}">
-    <td><input type="checkbox" data-short="${i}"${r.shortlisted ? " checked" : ""} title="Shortlist for the work queue"></td>
-    <td><span class="verdict ${skip ? "v-skip" : "v-review"}">${esc(r.verdict)}</span>
+    <td><input type="checkbox" data-short="${i}"${r.shortlisted ? " checked" : ""}${a && !a.queueEligible ? " disabled" : ""} title="${a && !a.queueEligible ? "Cannot be queued: " + esc(a.reasons[0].text) : "Shortlist for the work queue"}"></td>
+    <td><span class="verdict ${cls}">${esc(verdict)}</span>
       <div class="sub">${r.score}</div></td>
     <td>
       <a class="lbl" data-card="${esc(c.cardId)}">${esc(c.title || "(no title read)")}</a>
@@ -168,6 +275,8 @@ function rowHtml(r, i) {
       <div class="sub">${c.pay ? esc(c.pay) + " &middot; " : ""}${c.applicants != null ? c.applicants + " applicants &middot; " : ""}${c.posted ? esc(c.posted.raw) + (c.posted.reposted ? " (reposted)" : "") : ""}${c.earlyApplicant ? " &middot; early applicant" : ""}</div>
       ${c.tags.length ? `<div class="sub">tags: ${c.tags.map(esc).join(", ")}</div>` : ""}
       ${c.applyButtons.length ? `<div class="sub">apply affordance present: ${c.applyButtons.map(esc).join(", ")}. Never clicked.</div>` : ""}
+      ${stepsHtml(a)}
+      ${a && a.verdict !== "APPLY" ? `<div class="why">${esc(a.reasons[0].text)}</div>` : ""}
       <ul class="reasons">${reasons.map((x) => `<li class="r-${esc(x.kind)}">${esc(x.text)}</li>`).join("")}</ul>
       ${r.referralLead ? `<div class="referral">Referral lead: ${esc(r.referralLead.text)}</div>` : ""}
       ${harvestedHtml(state.store.harvested[c.listingUrl])}
@@ -216,6 +325,12 @@ function wire() {
   for (const box of container.querySelectorAll("[data-short]")) {
     box.onchange = async () => {
       const r = state.result.rows[Number(box.dataset.short)];
+      const a = state.report.assessed.find((x) => x.row.card.listingUrl === r.card.listingUrl);
+      if (box.checked && a && !a.queueEligible) {
+        $("tri-status").textContent = `Not queueable: ${a.reasons[0].text}`;
+        box.checked = false;
+        return;
+      }
       if (!r.card.listingUrl) {
         $("tri-status").textContent = "That card has no listing URL, so there is nothing stable to key a shortlist entry to.";
         box.checked = false;
@@ -223,7 +338,8 @@ function wire() {
       }
       state.store = await setShortlisted(r.card.listingUrl, {
         title: r.card.title, company: r.card.company, listingUrl: r.card.listingUrl,
-        verdict: r.verdict, referralLead: r.referralLead, destinationUrl: null
+        verdict: a ? a.verdict : r.verdict, referralLead: r.referralLead,
+        destinationUrl: a ? a.state.destinationUrl : null
       }, box.checked);
       state.result = triageAll(state.scan.cards, state.store);
     };

@@ -194,28 +194,60 @@ export function parseQualificationTags(tagElements) {
   })).filter((t) => t.text && t.text.length <= 60);
 }
 
-/** The destination link, read from an href and never discovered by clicking. */
+export const JOBRIGHT_HOST = /(^|\.)jobright\.ai$/i;
+
+export function isJobrightUrl(url) {
+  if (!url) return false;
+  try { return JOBRIGHT_HOST.test(new URL(url).hostname); } catch { return /jobright\.ai/i.test(String(url)); }
+}
+
+/**
+ * The destination link, read from an href and never discovered by clicking.
+ *
+ * This reports three separate facts, because they fail for different reasons
+ * and conflating them is what let a Jobright URL pass itself off as a
+ * destination:
+ *   originalPostFound   was there a link whose text says Original Job Post
+ *   destinationUrl      a real href, off jobright.ai, or null
+ *   destinationIsJobright  true when all we have is the Jobright URL
+ *
+ * destinationUrl is null when there is nothing real. It is never backfilled
+ * with the Jobright URL, because that is not a destination.
+ */
 export function resolveDestination(links, jobrightUrl) {
   const candidates = (links || []).filter((l) =>
     ORIGINAL_POST_PATTERNS.some((re) => re.test(l.text || "")));
 
   for (const c of candidates) {
     const href = String(c.href || "");
-    if (!UNRESOLVED_HREF.some((re) => re.test(href))) {
-      return { destinationUrl: href, resolvesOnOpen: false, via: "original job post href" };
-    }
+    if (UNRESOLVED_HREF.some((re) => re.test(href))) continue;
+    if (isJobrightUrl(href)) continue; // an internal link is not the destination
+    return {
+      originalPostFound: true,
+      destinationUrl: href,
+      destinationIsJobright: false,
+      resolvesOnOpen: false,
+      jobrightUrl: jobrightUrl || null,
+      via: "original job post href"
+    };
   }
   if (candidates.length) {
     return {
-      destinationUrl: jobrightUrl || null,
+      originalPostFound: true,
+      destinationUrl: null,
+      destinationIsJobright: true,
       resolvesOnOpen: true,
-      via: "original job post present but its href does not resolve, so the Jobright URL is stored"
+      jobrightUrl: jobrightUrl || null,
+      via: "an Original Job Post link is present but its href does not resolve to anything off jobright.ai"
     };
   }
   return {
-    destinationUrl: jobrightUrl || null,
+    originalPostFound: false,
+    destinationUrl: null,
+    destinationIsJobright: true,
     resolvesOnOpen: true,
-    via: "no original job post link found, so the Jobright URL is stored"
+    jobrightUrl: jobrightUrl || null,
+    via: "no Original Job Post link was found in the panel"
   };
 }
 
@@ -227,8 +259,19 @@ export function parsePanel(raw) {
   const sections = splitSections(panelText);
 
   const insider = parseInsider(sections.insider || []);
-  const required = bulletsOf(sections.required);
+  let required = bulletsOf(sections.required);
   const preferred = bulletsOf(sections.preferred);
+
+  // Some panels label the block "Qualification" and run the requirements
+  // straight under it with no "Required" sub-heading. Falling back is better
+  // than running eligibility against nothing, but it has to be visible, because
+  // eligibility over an empty string reports no blockers and that reads exactly
+  // like a clean posting.
+  let requiredFrom = required.length ? "required heading" : null;
+  if (!required.length && (sections.qualification || []).length) {
+    required = bulletsOf(sections.qualification);
+    requiredFrom = required.length ? "qualification heading (no Required sub-heading was found)" : null;
+  }
 
   const record = {
     header: parseHeader(sections.header, panelText),
@@ -237,6 +280,7 @@ export function parsePanel(raw) {
     responsibilities: bulletsOf(sections.responsibilities),
     qualificationTags: parseQualificationTags(raw.tagElements),
     required,
+    requiredFrom,
     preferred,
     benefits: bulletsOf(sections.benefits),
     companyFacts: parseCompanyFacts(panelText),
@@ -249,13 +293,14 @@ export function parsePanel(raw) {
 
   record.missing = [
     ["required", required.length === 0],
+    ["originalPostLink", record.originalPostFound === false],
     ["preferred", preferred.length === 0],
     ["responsibilities", record.responsibilities.length === 0],
     ["benefits", record.benefits.length === 0],
     ["insider", insider.leads.length === 0 && !Object.values(insider.buckets).some((b) => b.people.length)],
     ["match.overall", record.match.overall === null],
     ["match.subscores", Object.values(record.match.subscores).every((v) => v === null)],
-    ["destinationUrl", record.resolvesOnOpen]
+    ["destinationUrl", !record.destinationUrl]
   ].filter(([, isMissing]) => isMissing).map(([name]) => name);
 
   return record;

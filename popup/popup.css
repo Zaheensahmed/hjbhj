@@ -128,3 +128,16 @@ ul.reasons li.r-boost { color: var(--green); }
 .q-after:empty { display: none; }
 .q-after { margin-top: 6px; }
 button:disabled { opacity: .45; cursor: default; }
+
+/* --------------------------------------------------- harvest step states */
+.v-apply { background: color-mix(in srgb, var(--green) 24%, transparent); color: var(--green); }
+.steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
+.step { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+.step.s-ok { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.step.s-bad { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); font-weight: 600; }
+.step.s-none { background: var(--chip); color: var(--muted); font-style: italic; }
+table.steps-table { width: 100%; font-size: 11px; margin: 5px 0; border-collapse: collapse; }
+table.steps-table td { padding: 1px 6px 1px 0; color: var(--muted); }
+table.steps-table td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); width: 36px; }
+table.steps-table tr.bad td { color: var(--red); }
+table.steps-table tr.bad td:nth-child(2) { font-weight: 700; }

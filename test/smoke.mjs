@@ -18,6 +18,8 @@ import { buildReport, reportToText, sectionText, SECTIONS, SECTION_TITLES } from
 import { triageCard, triageAll, VERDICTS } from "../engine/triage.js";
 import { parsePanel, splitSections, bulletsOf, parseInsider, parseMatch, resolveDestination, parseQualificationTags } from "../engine/harvest.js";
 import { QUEUE_STATUSES, AUTO_SETTABLE, advanceOnOpen, nextToOpen, queueSummary, toTrackerRecord, atsFromUrl, slugify, harvestSummaryMessage, earlyTerminationMessage } from "../engine/queue.js";
+import { assess, harvestStateOf, boardReport, partitionQueue, STAGE2_VERDICTS } from "../engine/assess.js";
+import { isJobrightUrl } from "../engine/harvest.js";
 import * as JR from "../rules/jobright-rules.js";
 import { execFileSync } from "node:child_process";
 
@@ -1050,19 +1052,30 @@ group("Feature 4: the destination link is read, never clicked");
 
   const real = resolveDestination([{ text: "Original Job Post", href: "https://acme.example/jobs/9" }], JOBRIGHT);
   ok("a real href becomes the destination", real.destinationUrl === "https://acme.example/jobs/9" && real.resolvesOnOpen === false);
+  ok("a real href is reported as found and not jobright", real.originalPostFound === true && real.destinationIsJobright === false);
 
+  // A destination is never backfilled with the Jobright URL. These three states
+  // fail for different reasons and have to stay distinguishable, because
+  // conflating them is what let a jobright.ai link pass itself off as a
+  // destination and reach the work queue.
   for (const href of ["#", "javascript:void(0)", "", "about:blank"]) {
     const r = resolveDestination([{ text: "Original Job Post", href }], JOBRIGHT);
-    ok(`an href of "${href || "(empty)"}" stores the Jobright URL and marks resolves-on-open`,
-      r.destinationUrl === JOBRIGHT && r.resolvesOnOpen === true);
+    ok(`an href of "${href || "(empty)"}" yields NO destination, with the link still reported as found`,
+      r.destinationUrl === null && r.originalPostFound === true && r.destinationIsJobright === true);
   }
 
+  const internal = resolveDestination([{ text: "Original Job Post", href: "https://jobright.ai/jobs/info/xyz" }], JOBRIGHT);
+  ok("an Original Job Post href pointing back at jobright is not a destination",
+    internal.destinationUrl === null && internal.destinationIsJobright === true);
+
   const none = resolveDestination([{ text: "Share", href: "https://x.test" }], JOBRIGHT);
-  ok("with no Original Job Post link the Jobright URL is stored", none.destinationUrl === JOBRIGHT && none.resolvesOnOpen === true);
-  ok("the reason is recorded", /no original job post link/i.test(none.via));
+  ok("with no Original Job Post link there is no destination at all", none.destinationUrl === null);
+  ok("and the link is reported as not found, which is the diagnosable part", none.originalPostFound === false);
+  ok("the reason is recorded", /no original job post link was found/i.test(none.via));
   ok("an unrelated link is never mistaken for the destination", none.destinationUrl !== "https://x.test");
   ok("Apply is never a source of the destination URL",
-    resolveDestination([{ text: "Apply with Autofill", href: "https://acme.example/apply" }], JOBRIGHT).destinationUrl === JOBRIGHT);
+    resolveDestination([{ text: "Apply with Autofill", href: "https://acme.example/apply" }], JOBRIGHT).destinationUrl === null);
+  ok("the Jobright URL is still kept, just not as a destination", none.jobrightUrl === JOBRIGHT);
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,6 +1415,239 @@ group("Feature 5: packaging");
   }
   ok("every fetch in the extension targets a bundled file", offenders.length === 0, offenders.join(" | "));
   ok("nothing opens a socket", !files.some((f) => /WebSocket|EventSource/.test(fs.readFileSync(path.join(root, f), "utf8"))));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Silent failure fix: a jobright.ai URL is never a destination");
+{
+  ok("jobright hosts are recognised",
+    isJobrightUrl("https://jobright.ai/jobs/info/abc") && isJobrightUrl("https://www.jobright.ai/x"));
+  ok("an employer host is not", !isJobrightUrl("https://boards.greenhouse.io/acme/jobs/1"));
+  ok("rubbish does not throw", isJobrightUrl("not a url") === true || isJobrightUrl("not a url") === false);
+  ok("an empty URL is not a destination", !isJobrightUrl(""));
+
+  const row = (v = "REVIEW") => ({ verdict: v, card: { listingUrl: "https://jobright.ai/jobs/info/u1" } });
+  const good = {
+    harvestStatus: "ok", blocked: false,
+    record: { required: ["Must graduate in 2029 or later", "Remain enrolled"], preferred: [], requiredFrom: "required heading",
+      originalPostFound: true, destinationUrl: "https://acme.example/j/1", destinationIsJobright: false, insider: { leads: [] } },
+    eligibility: { insufficientText: false, blocked: false, blockers: [], flags: [] }
+  };
+  const withRec = (patch) => ({ ...good, record: { ...good.record, ...patch } });
+
+  ok("a fully harvested card reaches APPLY", assess(row(), good).verdict === "APPLY");
+  ok("and is queue eligible", assess(row(), good).queueEligible === true);
+
+  // The five ways it must NOT be queue eligible.
+  const cases = [
+    ["not harvested at all", null, "not_harvested"],
+    ["panel never opened", { harvestStatus: "harvest failed", why: "panel did not render" }, "panel_failed"],
+    ["no Required list found", { ...good, record: { ...good.record, required: [] } }, "no_required"],
+    ["no Original Job Post link", withRec({ originalPostFound: false, destinationUrl: null, destinationIsJobright: true }), "no_original_post"],
+    ["only a jobright URL", withRec({ originalPostFound: true, destinationUrl: null, destinationIsJobright: true }), "no_destination"]
+  ];
+  for (const [name, harvested, code] of cases) {
+    const a = assess(row(), harvested);
+    ok(`${name}: verdict REVIEW, not queueable`, a.verdict === "REVIEW" && a.queueEligible === false, a.verdict);
+    ok(`${name}: the reason names the failing step`, a.reasons[0].code === code, a.reasons[0].code);
+  }
+
+  // Eligibility over too little text is not an assessment.
+  const thin = assess(row(), { ...good, eligibility: { insufficientText: true, blocked: false, blockers: [], flags: [] } });
+  ok("a clean verdict over too little requirement text does not reach APPLY",
+    thin.verdict === "REVIEW" && thin.queueEligible === false && thin.reasons[0].code === "too_little_text");
+
+  // Blocked and stage-1 skip.
+  ok("blocked on the real requirements is SKIP",
+    assess(row(), { ...good, blocked: true, eligibility: { insufficientText: false, blocked: true, blockers: [{ filter: "Active clearance", why: "needs one now" }], flags: [] } }).verdict === "SKIP");
+  ok("a stage-1 skip stays SKIP", assess(row("SKIP"), good).verdict === "SKIP");
+
+  // Even if a destination somehow is a jobright URL, it is not accepted.
+  const sneaky = assess(row(), withRec({ destinationUrl: "https://jobright.ai/jobs/info/u1" }));
+  ok("a jobright URL in the destination field is discarded, not used",
+    sneaky.state.destinationUrl === null && sneaky.queueEligible === false);
+}
+
+// ---------------------------------------------------------------------------
+group("Silent failure fix: REVIEW can never reach the queue");
+{
+  ok("stage 2 has three verdicts and APPLY is one of them",
+    JSON.stringify(STAGE2_VERDICTS) === '["APPLY","REVIEW","SKIP"]');
+  ok("stage 1 still has only two, and still cannot say APPLY",
+    JSON.stringify(VERDICTS) === '["REVIEW","SKIP"]');
+
+  const entry = (o) => ({ listingUrl: "https://jobright.ai/jobs/info/" + o.id, company: o.id, ...o });
+  const entries = [
+    entry({ id: "ready", destinationUrl: "https://acme.example/1", assessment: { verdict: "APPLY", queueEligible: true, reasons: [] } }),
+    entry({ id: "review", destinationUrl: null, assessment: { verdict: "REVIEW", queueEligible: false, reasons: [{ code: "not_harvested", text: "Not harvested." }] } }),
+    entry({ id: "skip", destinationUrl: "https://acme.example/3", assessment: { verdict: "SKIP", queueEligible: false, reasons: [{ code: "blocked", text: "Blocked." }] } }),
+    entry({ id: "jobrightdest", destinationUrl: "https://jobright.ai/jobs/info/jobrightdest", assessment: { verdict: "APPLY", queueEligible: true, reasons: [] } }),
+    entry({ id: "noassessment" })
+  ];
+  const { eligible, held } = partitionQueue(entries);
+
+  ok("only the fully ready row is eligible", eligible.length === 1 && eligible[0].id === "ready");
+  ok("a REVIEW row is held back", held.some((h) => h.id === "review"));
+  ok("a SKIP row is held back", held.some((h) => h.id === "skip"));
+  ok("a row whose destination is a jobright URL is held back even when marked eligible",
+    held.some((h) => h.id === "jobrightdest"));
+  ok("a row with no assessment at all is held back, not assumed fine",
+    held.some((h) => h.id === "noassessment"));
+  ok("held rows are kept with their reason, never silently dropped",
+    held.length === 4 && held.every((h) => h.heldBecause && h.heldBecause.length));
+}
+
+// ---------------------------------------------------------------------------
+group("Silent failure fix: harvest state is visible per board and per card");
+{
+  const mkRow = (id, verdict = "REVIEW") => ({ verdict, card: { listingUrl: "u" + id, title: "T" + id, company: "C" + id }, referralLead: null });
+  const okRec = (patch) => ({
+    harvestStatus: "ok", blocked: false, pageUrl: "https://jobright.ai/jobs",
+    record: {
+      required: ["Must graduate in 2029 or later"], preferred: [], requiredFrom: "required heading",
+      originalPostFound: true, destinationUrl: "https://acme.example/1", destinationIsJobright: false, insider: { leads: [] },
+      ...(patch && patch.record)
+    },
+    eligibility: { insufficientText: false, blocked: false, blockers: [], flags: [] },
+    ...(patch && patch.top)
+  });
+
+  const rows = [mkRow(1), mkRow(2), mkRow(3), mkRow(4)];
+  const harvestedByUrl = {
+    u1: okRec(),
+    u2: okRec({ record: { originalPostFound: false, destinationUrl: null, destinationIsJobright: true } }),
+    u3: { harvestStatus: "harvest failed", why: "panel did not render", pageUrl: "https://jobright.ai/jobs" }
+    // u4 deliberately never harvested
+  };
+  const report = boardReport({ rows, harvestedByUrl, run: { startedAt: "2026-10-12T10:00:00Z", finishedAt: "2026-10-12T10:08:00Z" }, boardUrl: "https://jobright.ai/jobs" });
+
+  ok("the report says whether harvest ran and when", report.ran && report.startedAt && report.finishedAt);
+  ok("it counts cards on the board", report.counts.cardsOnBoard === 4);
+  ok("it counts how many were attempted", report.counts.attempted === 3);
+  ok("it counts how many panels opened", report.counts.panelOpened === 2);
+  ok("it counts how many failed", report.counts.panelFailed === 1);
+  ok("it counts Required lists found", report.counts.requiredFound === 2);
+  ok("it counts Original Job Post links found", report.counts.originalPostFound === 1);
+  ok("it counts destinations that resolve off jobright", report.counts.destinationResolved === 1);
+  ok("it counts what is actually queueable", report.counts.queueEligible === 1);
+  ok("the three verdicts are counted separately",
+    report.counts.apply === 1 && report.counts.review === 3 && report.counts.skip === 0);
+
+  // Per card, the three steps are individually inspectable.
+  const byUrl = (u) => report.assessed.find((a) => a.row.card.listingUrl === u).state;
+  ok("card 1 shows all steps passing",
+    byUrl("u1").panelOpened && byUrl("u1").requiredFound && byUrl("u1").originalPostFound && byUrl("u1").destinationUrl);
+  ok("card 2 shows the link step failing and the others passing",
+    byUrl("u2").panelOpened && byUrl("u2").requiredFound && !byUrl("u2").originalPostFound);
+  ok("card 3 shows the panel step failing", !byUrl("u3").panelOpened && byUrl("u3").failureReason === "panel did not render");
+  ok("card 4 shows as never attempted", byUrl("u4").attempted === false);
+
+  // Required falling back to the Qualification block is reported, not hidden.
+  const fallback = boardReport({
+    rows: [mkRow(1)], boardUrl: "b",
+    harvestedByUrl: { u1: { ...okRec(), pageUrl: "b", record: { ...okRec().record, requiredFrom: "qualification heading (no Required sub-heading was found)" } } },
+    run: { startedAt: "x" }
+  });
+  ok("a Required fallback is counted", fallback.counts.requiredFromFallback === 1);
+  ok("and raises a warning", fallback.alarms.some((a) => a.code === "required_fallback" && a.severity === "warn"));
+}
+
+// ---------------------------------------------------------------------------
+group("Silent failure fix: zero Original Job Post links is loud");
+{
+  const rows = [1, 2, 3].map((i) => ({ verdict: "REVIEW", card: { listingUrl: "u" + i, title: "T", company: "C" }, referralLead: null }));
+  const noLinks = {};
+  for (const i of [1, 2, 3]) {
+    noLinks["u" + i] = {
+      harvestStatus: "ok", blocked: false, pageUrl: "b",
+      record: { required: ["Must graduate in 2029 or later"], preferred: [], requiredFrom: "required heading",
+        originalPostFound: false, destinationUrl: null, destinationIsJobright: true, insider: { leads: [] } },
+      eligibility: { insufficientText: false, blocked: false, blockers: [], flags: [] }
+    };
+  }
+  const report = boardReport({ rows, harvestedByUrl: noLinks, run: { startedAt: "x", finishedAt: "y" }, boardUrl: "b" });
+
+  const alarm = report.alarms.find((a) => a.code === "zero_original_posts");
+  ok("zero links across the board raises a critical alarm", Boolean(alarm) && alarm.severity === "critical");
+  ok("the alarm says it is a selector problem, not a property of the jobs",
+    /selector problem/i.test(alarm.text) && /not 3 jobs without a destination/i.test(alarm.text), alarm.text);
+  ok("nothing is queueable", report.counts.queueEligible === 0);
+  ok("and queueing is suppressed entirely", report.safeToQueue === false);
+
+  // The other three loud cases.
+  const zeroPanels = boardReport({
+    rows, boardUrl: "b", run: { startedAt: "x" },
+    harvestedByUrl: Object.fromEntries([1, 2, 3].map((i) => ["u" + i, { harvestStatus: "harvest failed", why: "no panel", pageUrl: "b" }]))
+  });
+  ok("zero panels opening is a critical alarm", zeroPanels.alarms.some((a) => a.code === "zero_panels" && a.severity === "critical"));
+  ok("zero panels suppresses queueing", zeroPanels.safeToQueue === false);
+
+  const noRequired = {};
+  for (const i of [1, 2, 3]) {
+    noRequired["u" + i] = {
+      harvestStatus: "ok", blocked: false, pageUrl: "b",
+      record: { required: [], preferred: [], requiredFrom: null, originalPostFound: true, destinationUrl: "https://a.test/1", destinationIsJobright: false, insider: { leads: [] } },
+      eligibility: { insufficientText: true, blocked: false, blockers: [], flags: [] }
+    };
+  }
+  const zeroReq = boardReport({ rows, harvestedByUrl: noRequired, run: { startedAt: "x" }, boardUrl: "b" });
+  ok("zero Required lists is a critical alarm", zeroReq.alarms.some((a) => a.code === "zero_required"));
+  ok("the alarm says no clean verdict means anything", /no clean verdict here means anything/i.test(zeroReq.alarms.find((a) => a.code === "zero_required").text));
+  ok("zero Required suppresses queueing", zeroReq.safeToQueue === false);
+
+  const unresolved = {};
+  for (const i of [1, 2, 3]) {
+    unresolved["u" + i] = {
+      harvestStatus: "ok", blocked: false, pageUrl: "b",
+      record: { required: ["Must graduate in 2029 or later"], preferred: [], requiredFrom: "required heading",
+        originalPostFound: true, destinationUrl: null, destinationIsJobright: true, insider: { leads: [] } },
+      eligibility: { insufficientText: false, blocked: false, blockers: [], flags: [] }
+    };
+  }
+  const zeroResolved = boardReport({ rows, harvestedByUrl: unresolved, run: { startedAt: "x" }, boardUrl: "b" });
+  ok("links found but none resolving is a critical alarm", zeroResolved.alarms.some((a) => a.code === "zero_resolved"));
+  ok("that alarm guesses the likely cause", /button that navigates in script/i.test(zeroResolved.alarms.find((a) => a.code === "zero_resolved").text));
+
+  // A healthy board raises nothing and allows queueing.
+  const healthy = boardReport({
+    rows, boardUrl: "b", run: { startedAt: "x", finishedAt: "y" },
+    harvestedByUrl: Object.fromEntries([1, 2, 3].map((i) => ["u" + i, {
+      harvestStatus: "ok", blocked: false, pageUrl: "b",
+      record: { required: ["Must graduate in 2029 or later"], preferred: [], requiredFrom: "required heading",
+        originalPostFound: true, destinationUrl: "https://acme.example/" + i, destinationIsJobright: false, insider: { leads: [] } },
+      eligibility: { insufficientText: false, blocked: false, blockers: [], flags: [] }
+    }]))
+  });
+  ok("a healthy board raises no alarms", healthy.alarms.length === 0);
+  ok("a healthy board is safe to queue", healthy.safeToQueue === true && healthy.counts.queueEligible === 3);
+}
+
+// ---------------------------------------------------------------------------
+group("Silent failure fix: the UI cannot reintroduce the fallback");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const q = stripComments(fs.readFileSync(path.join(root, "popup/tab-queue.js"), "utf8"));
+
+  // The exact line that caused this.
+  ok("the queue never falls back to the listing URL for a destination",
+    !/destinationUrl:[^\n]*\|\|[^\n]*listingUrl/.test(q), "the || s.listingUrl fallback is back");
+  ok("the queue derives its destination from the assessment", /assessment\.state\.destinationUrl/.test(q));
+  ok("open next refuses a jobright URL", /isJobrightUrl\(next\.destinationUrl\)/.test(q));
+  ok("the refusal explains it is a bug, not a destination",
+    /not the employer's posting|is a bug, not a destination/i.test(q));
+  ok("the queue partitions rather than filtering silently", /partitionQueue/.test(q));
+  ok("held-back rows are rendered with their reason", /heldBecause/.test(q));
+
+  const t = stripComments(fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8"));
+  ok("auto-queue only ever adds queue-eligible rows", /if \(!a\.queueEligible\) continue;/.test(t));
+  ok("auto-queue is suppressed while a critical alarm stands", /safeToQueue/.test(t));
+  ok("ticking a non-eligible row is refused with a reason", /Not queueable:/.test(t));
+  ok("the triage tab renders the per-card steps", /stepsHtml/.test(t));
+  ok("the triage tab renders the board-level harvest report", /harvestReportHtml/.test(t));
+  ok("the triage tab says harvest has not run when it has not", /Harvest has not run on this board/.test(t));
+  ok("the triage tab states that REVIEW means not yet assessed", /REVIEW means not yet assessed/i.test(t));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -10,27 +10,40 @@
 
 import { getTriage, setQueueStatus, setShortlisted, addTrackerRecord } from "../shared/store.js";
 import { nextToOpen, advanceOnOpen, queueSummary, toTrackerRecord, QUEUE_STATUSES } from "../engine/queue.js";
+import { assess, partitionQueue } from "../engine/assess.js";
+import { isJobrightUrl } from "../engine/harvest.js";
 import { $, esc, show, flash } from "./ui.js";
 
-const state = { store: null, entries: [], lastSubmitted: null };
+const state = { store: null, entries: [], held: [], lastSubmitted: null };
 
 export function initQueueTab() {
   $("q-refresh").onclick = () => load();
   $("q-open-next").onclick = () => openNext();
+  $("q-purge").onclick = () => purgeHeld();
   load();
 }
 
+/**
+ * The queue is derived from the harvest, not from what was ticked. A shortlist
+ * entry only becomes a queue row if its own harvested record carries a
+ * destination off jobright.ai. There is deliberately no fallback to the
+ * listing URL: substituting a jobright.ai link for a missing destination is
+ * what filled this queue with rows that looked ready and were not.
+ */
 function entriesFrom(store) {
   return Object.values(store.shortlist || {}).map((s) => {
     const h = store.harvested[s.listingUrl] || null;
     const rec = h && h.record ? h.record : null;
+    const assessment = assess({ verdict: s.verdict === "SKIP" ? "SKIP" : "REVIEW", card: { listingUrl: s.listingUrl } }, h);
     return {
       ...s,
       queueStatus: s.queueStatus || "queued",
-      destinationUrl: (rec && rec.destinationUrl) || s.destinationUrl || s.listingUrl || null,
+      destinationUrl: assessment.state.destinationUrl,
+      jobrightUrl: s.listingUrl || null,
       resolvesOnOpen: rec ? Boolean(rec.resolvesOnOpen) : null,
       referralLeads: rec ? rec.insider.leads : (s.referralLead ? [s.referralLead] : []),
       harvested: h,
+      assessment,
       blocked: h ? Boolean(h.blocked) : null
     };
   }).sort((a, b) =>
@@ -40,15 +53,31 @@ function entriesFrom(store) {
 
 export async function load() {
   state.store = await getTriage();
-  state.entries = entriesFrom(state.store);
+  const all = entriesFrom(state.store);
+  const { eligible, held } = partitionQueue(all);
+  state.entries = eligible;
+  state.held = held;
   render();
+}
+
+async function purgeHeld() {
+  for (const e of state.held) await setShortlisted(e.listingUrl, null, false);
+  await load();
 }
 
 async function openNext() {
   const next = nextToOpen(state.entries);
   if (!next) { $("q-status").textContent = "Nothing queued."; return; }
   if (!next.destinationUrl) {
-    $("q-status").textContent = `${next.company} has no destination URL on record. Harvest it first, or open it from the board.`;
+    $("q-status").textContent = `${next.company} has no destination URL on record. Harvest it first.`;
+    return;
+  }
+  // A jobright.ai URL is a bug, not a destination. Refuse it even if one got
+  // this far, because opening one wastes a click and teaches nothing.
+  if (isJobrightUrl(next.destinationUrl)) {
+    $("q-status").textContent =
+      `Refusing to open ${next.destinationUrl} for ${next.company}. That is a jobright.ai link, not the employer's posting. ` +
+      `Harvest did not find an Original Job Post href for this card.`;
     return;
   }
   // Foreground, because the point is that you look at it.
@@ -61,8 +90,12 @@ async function openNext() {
 function render() {
   const s = queueSummary(state.entries);
   $("q-status").textContent = state.entries.length
-    ? `${s.total} shortlisted. ${s.queued} queued, ${s.opened} opened, ${s.submitted} submitted, ${s.skipped} skipped. ${s.withReferral} with a referral lead.`
-    : "Nothing shortlisted yet. Tick cards in the Triage tab.";
+    ? `${s.total} ready. ${s.queued} queued, ${s.opened} opened, ${s.submitted} submitted, ${s.skipped} skipped. ${s.withReferral} with a referral lead.`
+    : state.held.length
+      ? `Nothing is ready to open. ${state.held.length} shortlisted row${state.held.length === 1 ? " is" : "s are"} held back below, with the reason for each.`
+      : "Nothing shortlisted yet. Harvest a board in the Triage tab.";
+
+  show("q-purge", state.held.length > 0);
 
   $("q-open-next").disabled = !nextToOpen(state.entries);
 
@@ -81,9 +114,26 @@ function render() {
         <button class="small ghost" data-remove="${i}">Remove</button>
       </div>
       <div class="q-after" data-after="${i}"></div>
-    </div>`).join("");
+    </div>`).join("") + heldHtml();
 
   wire();
+}
+
+/**
+ * Held-back rows are shown, never silently dropped. Dropping them quietly would
+ * be the same disease as queueing them quietly.
+ */
+function heldHtml() {
+  if (!state.held.length) return "";
+  return `<h3 class="subhead">Held back (${state.held.length})</h3>
+    <p class="note">Shortlisted but not ready to open. Each one names which step is missing. None of these can be opened or marked submitted.</p>
+    ${state.held.map((e) => `
+      <div class="card amber">
+        <div><strong>${esc(e.company || "(no company)")}</strong> <span class="verdict ${e.verdict === "SKIP" ? "v-skip" : "v-review"}">${esc(e.verdict)}</span></div>
+        <div class="val">${esc(e.title || "")}</div>
+        <div class="why">${e.heldBecause.map((r) => esc(r.text)).join("<br>")}</div>
+        <div class="meta">jobright: ${esc((e.jobrightUrl || "").slice(0, 54))}</div>
+      </div>`).join("")}`;
 }
 
 function wire() {

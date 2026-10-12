@@ -364,6 +364,64 @@ pure, so the whole parser is tested against synthetic panel text.
 
 Same caveat as stage 1: **none of this has met a live Jobright page.**
 
+## The queue gate
+
+A row reaches the work queue only with evidence, and the evidence has to come
+from a harvest that actually worked. `engine/assess.js` is the gate.
+
+| state | verdict | queueable |
+|-------|---------|-----------|
+| ruled out at stage 1 | SKIP | no |
+| never harvested | REVIEW | no |
+| panel never opened | REVIEW | no |
+| no Required list found in the panel | REVIEW | no |
+| too little requirement text to assess | REVIEW | no |
+| blocked on the real requirements | SKIP | no |
+| no Original Job Post link found | REVIEW | no |
+| link found but no href off jobright.ai | REVIEW | no |
+| all of the above passed | **APPLY** | yes |
+
+**REVIEW means not yet assessed.** It is not a weak yes, and it never queues.
+APPLY exists only in `engine/assess.js`; `engine/triage.js` still has two
+verdicts and still cannot say APPLY, because stage 1 has no requirement text.
+
+A `jobright.ai` URL is never a destination. `resolveDestination()` returns
+`destinationUrl: null` rather than backfilling the Jobright link, and reports
+`originalPostFound` and `destinationIsJobright` as separate facts, because they
+fail for different reasons. **Open next refuses to open a jobright.ai URL** even
+if one somehow reaches it.
+
+Shortlisted rows that do not pass the gate are not dropped: they appear under
+**Held back** in the Queue tab, each naming the step that failed.
+
+## Harvest state, per board and per card
+
+The Triage tab shows whether harvest has run on this board, when, how many cards
+it read and how many failed, and then the funnel:
+
+```
+cards on board                12
+harvest attempted             12
+detail panel opened           11   of 12
+Required text found           11   of 11
+Original Job Post link found   0   of 11      <- the break is visible
+destination off jobright.ai    0   of 0
+queue eligible                 0        APPLY 0 · REVIEW 12 · SKIP 0
+```
+
+Each row carries the same four steps as a traffic light, so you can see which
+one broke per card rather than inferring it from an empty queue.
+
+Four conditions raise a loud banner and **suppress queueing entirely**:
+
+- no panel ever opened
+- no Required list found on any card
+- no Original Job Post link found on any card
+- links found but none carrying a usable href
+
+Each says it is a selector problem rather than a property of the jobs, because
+zero destinations across a whole board is never twelve jobs without one.
+
 ## Work queue and notifications
 
 The **Queue** tab lists shortlisted roles with company, title, destination URL,
