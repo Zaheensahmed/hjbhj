@@ -18,32 +18,19 @@
   console.log("[JAF injected] jobright-harvest.js (detail harvest loop)");
   const JR = (globalThis.JAF_JR = globalThis.JAF_JR || {});
 
-  const text = (el) => (el ? (el.innerText || el.textContent || "").replace(/[^\S\n]+/g, " ").trim() : "");
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const rx = (p) => new RegExp(p.source, String(p.flags || "").replace("g", ""));
+  // Detection is shared with the DOM dump, in content/jobright-detect.js.
+  const D = () => globalThis.JAF_JR.detect;
+  const text = (el) => D().text(el);
+  const sleep = (ms) => D().sleep(ms);
+  const rx = (p) => D().rx(p);
 
   let control = { stop: false };
   let run = null;
 
   // ------------------------------------------------------------- click policy
 
-  function clickLabel(el) {
-    return [
-      el.getAttribute && el.getAttribute("aria-label"),
-      el.getAttribute && el.getAttribute("title"),
-      el.getAttribute && el.getAttribute("data-testid"),
-      text(el).slice(0, 120),
-      el.className && typeof el.className === "string" ? el.className : ""
-    ].filter(Boolean).join(" | ");
-  }
-
-  function isForbidden(el, rules) {
-    const label = clickLabel(el);
-    for (const p of rules.FORBIDDEN_CLICK) {
-      if (rx(p).test(label)) return p.source;
-    }
-    return null;
-  }
+  const clickLabel = (el) => D().clickLabel(el);
+  const isForbidden = (el, rules) => D().isForbidden(el, rules);
 
   /**
    * The only way anything in this file clicks. Refuses on FORBIDDEN_CLICK and
@@ -61,80 +48,9 @@
     return { ok: true };
   }
 
-  // ------------------------------------------------------------------ waiting
-
-  /**
-   * Wall-clock waiting. A hidden tab has its timers throttled, so a sleep can
-   * stretch from 250ms to a minute. That is slowness, not failure: the budget
-   * is multiplied while hidden, and nothing fails before minPolls attempts
-   * however long the gaps were.
-   */
-  async function waitFor(predicate, rules, label) {
-    const started = Date.now();
-    let polls = 0;
-    let wasHidden = document.hidden;
-
-    while (true) {
-      polls++;
-      let hit = false;
-      try { hit = Boolean(predicate()); } catch { hit = false; }
-      if (hit) return { ok: true, polls, ms: Date.now() - started, throttled: wasHidden };
-
-      if (document.hidden) wasHidden = true;
-      const budget = rules.HARVEST.renderTimeoutMs * (wasHidden ? rules.HARVEST.hiddenMultiplier : 1);
-      if (polls >= rules.HARVEST.minPolls && Date.now() - started > budget) {
-        return { ok: false, polls, ms: Date.now() - started, throttled: wasHidden, label };
-      }
-      if (control.stop) return { ok: false, polls, ms: Date.now() - started, stopped: true };
-      await sleep(rules.HARVEST.pollMs);
-    }
-  }
+  const waitFor = (pred, rules, label) => D().waitFor(pred, rules, label);
 
   // ------------------------------------------------------------------- panels
-
-  function findPanel(rules) {
-    const evidence = (body) => rules.PANEL_EVIDENCE.filter((p) => rx(p).test(body)).length;
-
-    for (const sel of rules.PANEL_SELECTORS) {
-      let found;
-      try { found = [...document.querySelectorAll(sel)]; } catch { continue; }
-      const hit = found.find((el) => {
-        if (!el.getClientRects().length) return false;
-        return evidence(text(el)) >= 2;
-      });
-      if (hit) return hit;
-    }
-    // Fallback: the smallest visible element carrying the panel's own content.
-    const all = [...document.querySelectorAll("div, aside, section")].filter(
-      (el) => el.getClientRects().length && evidence(text(el)) >= 3 && text(el).length > 200
-    );
-    const inner = all.filter((el) => !all.some((o) => o !== el && el.contains(o)));
-    return inner[0] || null;
-  }
-
-  function findCloseButton(panel, rules) {
-    const rect = panel.getBoundingClientRect();
-    const candidates = [];
-    for (const sel of rules.CLOSE_SELECTORS) {
-      let found;
-      try { found = [...panel.querySelectorAll(sel)]; } catch { continue; }
-      for (const el of found) {
-        if (!el.getClientRects().length) continue;
-        if (isForbidden(el, rules)) continue;
-        const label = clickLabel(el);
-        const looksClose =
-          /close/i.test(label) ||
-          rules.CLOSE_TEXTS.some((p) => rx(p).test(text(el)));
-        if (!looksClose) continue;
-        const r = el.getBoundingClientRect();
-        // The X is at the top-left of the panel, so score by distance from it.
-        candidates.push({ el, score: (r.left - rect.left) + (r.top - rect.top) * 1.5 });
-      }
-      if (candidates.length) break;
-    }
-    candidates.sort((a, b) => a.score - b.score);
-    return candidates.length ? candidates[0].el : null;
-  }
 
   function harvestPanelDom(panel) {
     const links = [...panel.querySelectorAll("a[href], button")].map((el) => ({
@@ -155,6 +71,25 @@
 
   function cardsOnPage() {
     return [...document.querySelectorAll("[data-jaf-card]")];
+  }
+
+  /**
+   * Re-find a card after the board has been re-rendered.
+   *
+   * Opening a card can change the URL, and coming back rebuilds the board, so
+   * the data-jaf-card stamps are gone and the original element references are
+   * detached. The listing URL is the stable key, so the board is re-scanned and
+   * matched on that.
+   */
+  function resolveCard(target, rules) {
+    const direct = document.querySelector(`[data-jaf-card="${target.cardId}"]`);
+    if (direct && direct.isConnected) return direct;
+
+    if (typeof JR.scanBoard !== "function") return null;
+    let rescan;
+    try { rescan = JR.scanBoard(rules); } catch { return null; }
+    const hit = (rescan.cards || []).find((c) => c.listingUrl && c.listingUrl === target.listingUrl);
+    return hit ? document.querySelector(`[data-jaf-card="${hit.cardId}"]`) : null;
   }
 
   async function report(type, payload) {
@@ -187,12 +122,17 @@
       : cardsOnPage();
 
     const capped = targets.slice(0, rules.HARVEST.maxCards);
+    const plan = capped.map((el) => ({
+      cardId: el.dataset.jafCard,
+      listingUrl: opts.urlByCardId ? opts.urlByCardId[el.dataset.jafCard] || null : null
+    }));
 
     run = {
       startedAt: new Date().toISOString(),
       startedMs: Date.now(),
-      total: capped.length,
+      total: plan.length,
       done: 0, failed: 0, stoppedEarly: false, stopReason: null,
+      navigationMode: null, boardUrl: location.href,
       current: null, clicks: [], refusals: [], results: []
     };
     control = { stop: false };
@@ -200,17 +140,18 @@
     await writeProgress();
     await report("harvest:start", { total: run.total });
 
-    // A navigation ends the run cleanly. Everything already read is in storage.
+    // A hard navigation would destroy this script. Client-side routing does not
+    // fire beforeunload, so if this ever runs, the run is genuinely over.
     const onUnload = () => {
       run.stoppedEarly = true;
-      run.stopReason = "navigation";
+      run.stopReason = "the page navigated away and the loop was unloaded";
       report("harvest:end", summary());
     };
     window.addEventListener("beforeunload", onUnload);
 
     let consecutiveFailures = 0;
 
-    for (const cardEl of capped) {
+    for (const target of plan) {
       await readControl();
       if (control.stop) { run.stoppedEarly = true; run.stopReason = "stopped by you"; break; }
       if (Date.now() - run.startedMs > rules.HARVEST.maxRunMs) {
@@ -218,39 +159,51 @@
       }
       if (consecutiveFailures >= rules.HARVEST.maxConsecutiveFailures) {
         run.stoppedEarly = true;
-        run.stopReason = `${consecutiveFailures} cards in a row failed to render, so something has changed on the page`;
+        run.stopReason = `${consecutiveFailures} cards in a row failed, so something has changed on the page`;
         break;
       }
 
-      const cardId = cardEl.dataset.jafCard;
-      run.current = cardId;
+      run.current = target.cardId;
       await writeProgress();
 
-      const before = findPanel(rules);
-      const opened = safeClick(cardEl, `open card ${cardId}`, rules);
+      const cardEl = resolveCard(target, rules);
+      if (!cardEl) {
+        run.failed++; consecutiveFailures++;
+        run.results.push({ ...target, status: "harvest failed", why: "the card is no longer on the board and could not be re-found by listing URL" });
+        await report("harvest:record", { ...target, status: "failed", why: "card not found after re-render" });
+        continue;
+      }
+
+      const urlBefore = location.href;
+      const evidenceBefore = D().evidenceIn(rules, document.body).hits.length;
+      const opened = safeClick(cardEl, `open card ${target.cardId}`, rules);
 
       if (!opened.ok) {
         run.failed++; consecutiveFailures++;
-        run.results.push({ cardId, status: "harvest failed", why: `could not open: ${opened.reason}` });
-        await report("harvest:record", { cardId, status: "failed", why: opened.reason });
+        run.results.push({ ...target, status: "harvest failed", why: `could not open: ${opened.reason}` });
+        await report("harvest:record", { ...target, status: "failed", why: opened.reason });
         continue;
       }
 
       const waited = await waitFor(() => {
-        const p = findPanel(rules);
-        return p && p !== before && text(p).length > 200;
-      }, rules, "panel render");
+        const found = D().findDetailView(rules);
+        return (found.found && found.evidence.length > evidenceBefore) || location.href !== urlBefore;
+      }, rules, "detail view");
 
-      if (!waited.ok) {
+      await sleep(500); // let a route finish painting
+
+      const routed = location.href !== urlBefore;
+      if (run.navigationMode === null) run.navigationMode = routed ? "route" : "overlay";
+
+      const detail = D().findDetailView(rules);
+      if (!waited.ok || !detail.found) {
         run.failed++; consecutiveFailures++;
         const why = waited.stopped
           ? "stopped while waiting"
-          : `panel did not render inside the budget (${waited.polls} polls over ${Math.round(waited.ms / 1000)}s${waited.throttled ? ", tab was hidden so the budget was extended" : ""})`;
-        run.results.push({ cardId, status: "harvest failed", why });
-        await report("harvest:record", { cardId, status: "failed", why });
-        // Try to leave the page as it was found.
-        const stray = findPanel(rules);
-        if (stray) safeClick(findCloseButton(stray, rules), "close after failure", rules);
+          : `the detail view did not appear (${waited.polls} polls over ${Math.round(waited.ms / 1000)}s${waited.throttled ? ", tab hidden so the budget was extended" : ""}). Evidence matched: ${detail.evidence.join(", ") || "none"}`;
+        run.results.push({ ...target, status: "harvest failed", why, detection: detail.diagnostics || null });
+        await report("harvest:record", { ...target, status: "failed", why });
+        await leaveDetailView(routed, urlBefore, detail.scope, rules);
         await writeProgress();
         if (waited.stopped) { run.stoppedEarly = true; run.stopReason = "stopped by you"; break; }
         await sleep(rules.HARVEST.pollMs * 4);
@@ -258,36 +211,25 @@
       }
 
       consecutiveFailures = 0;
-      const panel = findPanel(rules);
-      const raw = harvestPanelDom(panel);
-      const listingUrl = opts.urlByCardId ? opts.urlByCardId[cardId] || null : null;
+      const raw = harvestPanelDom(detail.scope);
 
-      // Parsing and eligibility happen in the service worker, which can import
-      // engine/. A classic content script cannot.
       await report("harvest:record", {
-        cardId,
-        listingUrl,
+        cardId: target.cardId,
+        listingUrl: target.listingUrl,
         status: "ok",
         raw,
-        pageUrl: location.href.split("?")[0],
+        pageUrl: run.boardUrl,
+        detailUrl: routed ? location.href : null,
         throttled: waited.throttled,
         renderMs: waited.ms
       });
 
       run.done++;
-      run.results.push({ cardId, status: "ok", renderMs: waited.ms });
+      run.results.push({ ...target, status: "ok", renderMs: waited.ms, routed });
       await writeProgress();
       await report("harvest:progress", { done: run.done, failed: run.failed, total: run.total });
 
-      const closeBtn = findCloseButton(panel, rules);
-      const closed = safeClick(closeBtn, `close card ${cardId}`, rules);
-      if (!closed.ok) {
-        // Escape is not a click, and it is the only fallback used. If the panel
-        // stays open the next card's click still works on most layouts.
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-        run.results[run.results.length - 1].closeNote = `close control not clicked (${closed.reason}); sent Escape instead`;
-      }
-      await waitFor(() => !findPanel(rules), rules, "panel close");
+      await leaveDetailView(routed, urlBefore, detail.scope, rules);
 
       const gap = rules.HARVEST.gapMinMs + Math.random() * (rules.HARVEST.gapMaxMs - rules.HARVEST.gapMinMs);
       await sleep(gap);
@@ -301,10 +243,33 @@
     return summary();
   };
 
+  /**
+   * Leave the detail view the way it was entered. A full-page route goes back
+   * in history; an overlay gets its X clicked, through the same guard.
+   */
+  async function leaveDetailView(routed, urlBefore, scope, rules) {
+    if (routed) {
+      history.back();
+      const back = await waitFor(() => location.href === urlBefore, rules, "return to the board");
+      if (!back.ok) run.results[run.results.length - 1] && (run.results[run.results.length - 1].closeNote = "history.back() did not return to the board in time");
+      // The board re-renders, so the card stamps are gone. resolveCard handles it.
+      await waitFor(() => cardsOnPage().length > 0 || typeof JR.scanBoard === "function", rules, "board back");
+      return;
+    }
+    const closeCand = D().findCloseAffordance(scope, rules);
+    const closed = closeCand ? safeClick(closeCand.el, "close detail view", rules) : { ok: false, reason: "no close control found" };
+    if (!closed.ok) {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      if (run.results.length) run.results[run.results.length - 1].closeNote = `close control not clicked (${closed.reason}); sent Escape instead`;
+    }
+    await waitFor(() => !D().findDetailView(rules).found, rules, "detail view closed");
+  }
+
   function summary() {
     return {
       total: run.total, done: run.done, failed: run.failed,
       stoppedEarly: run.stoppedEarly, stopReason: run.stopReason,
+      navigationMode: run.navigationMode,
       elapsedMs: Date.now() - run.startedMs,
       refusals: run.refusals,
       clickKinds: [...new Set(run.clicks.map((c) => c.why.replace(/ card-\d+$/, "")))],

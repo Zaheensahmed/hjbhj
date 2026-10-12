@@ -13,20 +13,16 @@
 (() => {
   console.log("[JAF injected] jobright-dump.js (panel DOM dump)");
   const JR = (globalThis.JAF_JR = globalThis.JAF_JR || {});
-  const text = (el) => (el ? (el.innerText || el.textContent || "").replace(/[^\S\n]+/g, " ").trim() : "");
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const rx = (p) => new RegExp(p.source, String(p.flags || "").replace("g", ""));
+  // Detection is shared with the harvest loop, in content/jobright-detect.js,
+  // so the two cannot drift apart.
+  const D = () => globalThis.JAF_JR.detect;
+  const text = (el) => D().text(el);
+  const sleep = (ms) => D().sleep(ms);
+  const rx = (p) => D().rx(p);
   const cut = (s, n) => (s == null ? "null" : String(s).length > n ? String(s).slice(0, n) + ` …(+${String(s).length - n})` : String(s));
 
-  function label(el) {
-    return [el.getAttribute && el.getAttribute("aria-label"), el.getAttribute && el.getAttribute("title"),
-            text(el).slice(0, 120), typeof el.className === "string" ? el.className : ""].filter(Boolean).join(" | ");
-  }
-  function forbidden(el, rules) {
-    const l = label(el);
-    for (const p of rules.FORBIDDEN_CLICK) if (rx(p).test(l)) return p.source;
-    return null;
-  }
+  const label = (el) => D().clickLabel(el);
+  const forbidden = (el, rules) => D().isForbidden(el, rules);
 
   /**
    * Classify an href, because "no destination" has four different causes and
@@ -142,36 +138,6 @@
     };
   }
 
-  function findPanel(rules) {
-    const score = (body) => rules.PANEL_EVIDENCE.filter((p) => rx(p).test(body)).length;
-    for (const sel of rules.PANEL_SELECTORS) {
-      let found; try { found = [...document.querySelectorAll(sel)]; } catch { continue; }
-      const hit = found.find((el) => el.getClientRects().length && score(text(el)) >= 2);
-      if (hit) return { panel: hit, via: sel };
-    }
-    const all = [...document.querySelectorAll("div, aside, section")].filter(
-      (el) => el.getClientRects().length && score(text(el)) >= 3 && text(el).length > 200);
-    const inner = all.filter((el) => !all.some((o) => o !== el && el.contains(o)));
-    return { panel: inner[0] || null, via: inner.length ? "text heuristic" : "none" };
-  }
-
-  function findCloseButton(panel, rules) {
-    const r = panel.getBoundingClientRect();
-    const out = [];
-    for (const sel of rules.CLOSE_SELECTORS) {
-      let found; try { found = [...panel.querySelectorAll(sel)]; } catch { continue; }
-      for (const el of found) {
-        if (!el.getClientRects().length || forbidden(el, rules)) continue;
-        if (!/close/i.test(label(el)) && !rules.CLOSE_TEXTS.some((p) => rx(p).test(text(el)))) continue;
-        const b = el.getBoundingClientRect();
-        out.push({ el, score: (b.left - r.left) + (b.top - r.top) * 1.5 });
-      }
-      if (out.length) break;
-    }
-    out.sort((a, b) => a.score - b.score);
-    return out.length ? out[0].el : null;
-  }
-
   /**
    * @param {{rules:object, cardId?:string}} opts
    */
@@ -186,21 +152,49 @@
     const block = forbidden(card, rules);
     if (block) { report.refusals.push({ what: "the card itself", matched: block }); return { ...report, error: "Refused to click the card." }; }
 
-    const before = findPanel(rules).panel;
+    const urlBefore = location.href;
+    const evidenceBefore = D().evidenceIn(rules, document.body).hits;
+
     card.click();
     report.steps.push("clicked the card open");
 
-    const deadline = Date.now() + (document.hidden ? 60000 : 15000);
-    let panel = null, via = "none";
-    while (Date.now() < deadline) {
-      const f = findPanel(rules);
-      if (f.panel && f.panel !== before && text(f.panel).length > 200) { panel = f.panel; via = f.via; break; }
-      await sleep(250);
-    }
-    if (!panel) return { ...report, error: "The detail panel never rendered. PANEL_SELECTORS and PANEL_EVIDENCE are the things to check." };
+    // Does opening a card route to a new URL, or overlay the board?
+    const settle = await D().waitFor(() => {
+      const found = D().findDetailView(rules);
+      return (found.found && found.evidence.length > evidenceBefore.length) || location.href !== urlBefore;
+    }, rules, "detail view or navigation");
 
+    await sleep(600); // let a route finish painting before measuring
+
+    const urlAfter = location.href;
+    report.navigation = {
+      urlBefore,
+      urlAfter,
+      urlChanged: urlAfter !== urlBefore,
+      mode: urlAfter !== urlBefore ? "route (clicking a card changes the URL)" : "overlay (URL unchanged)",
+      closeShouldBe: urlAfter !== urlBefore ? "history.back()" : "click the X",
+      scriptSurvived: true,
+      note: urlAfter !== urlBefore
+        ? "This script is still running after the URL changed, so it is client-side routing and an injected loop survives it."
+        : "The board stayed at the same URL, so the detail view is an overlay."
+    };
+
+    const detail = D().findDetailView(rules);
+    if (!detail.found) {
+      return {
+        ...report,
+        error: "The detail view was not detected.",
+        detection: detail.diagnostics,
+        waited: settle,
+        hint: "PANEL_EVIDENCE needs at least two matches in the page body. The diagnostics above list which matched, which did not, and the first lines of the body text."
+      };
+    }
+
+    const panel = detail.scope;
     report.panel = {
-      foundVia: via, tagName: panel.tagName,
+      foundVia: detail.via,
+      evidenceMatched: detail.evidence,
+      tagName: panel.tagName,
       className: cut(typeof panel.className === "string" ? panel.className : "", 200),
       attributes: attrs(panel), textLength: text(panel).length,
       firstLines: text(panel).split("\n").slice(0, 8)
@@ -261,10 +255,21 @@
 
     report.embeddedJson = embeddedJson();
 
-    // ---- close it again, through the same guard
-    const closeBtn = findCloseButton(panel, rules);
-    if (closeBtn) { closeBtn.click(); report.steps.push("clicked the panel's close control"); }
-    else {
+    // ---- report the close affordance, then leave the way the mode requires
+    const closeCand = D().findCloseAffordance(panel, rules);
+    report.closeAffordance = closeCand
+      ? { found: true, label: closeCand.label, tagName: closeCand.el.tagName,
+          attributes: attrs(closeCand.el), outerHTMLStart: cut(closeCand.el.outerHTML, 200) }
+      : { found: false, note: "No element in the detail view looked like a close control." };
+
+    if (report.navigation.urlChanged) {
+      history.back();
+      report.steps.push("went back in history, since opening a card changed the URL");
+      await D().waitFor(() => location.href === urlBefore, rules, "return to the board");
+    } else if (closeCand) {
+      closeCand.el.click();
+      report.steps.push("clicked the detail view's close control");
+    } else {
       document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       report.steps.push("no close control found; sent Escape");
     }

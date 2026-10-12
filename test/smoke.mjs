@@ -1152,11 +1152,13 @@ group("Feature 4: the harvest loop's click policy");
 group("Feature 4: loop resilience");
 {
   const src = fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8");
+  // Waiting now lives in the shared detection module, used by both consumers.
+  const det = fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8");
 
-  ok("waiting is wall-clock, not tick-counted", /Date\.now\(\)\s*-\s*started/.test(src));
-  ok("a hidden tab gets a multiplied budget, not a failure", /hiddenMultiplier/.test(src) && /document\.hidden/.test(src));
-  ok("nothing fails before a minimum number of polls", /polls\s*>=\s*rules\.HARVEST\.minPolls/.test(src));
-  ok("throttling is reported rather than hidden", /throttled/.test(src));
+  ok("waiting is wall-clock, not tick-counted", /Date\.now\(\)\s*-\s*started/.test(det));
+  ok("a hidden tab gets a multiplied budget, not a failure", /hiddenMultiplier/.test(det) && /document\.hidden/.test(det));
+  ok("nothing fails before a minimum number of polls", /polls\s*>=\s*h\.minPolls/.test(det));
+  ok("throttling is reported rather than hidden", /throttled/.test(det) && /throttled/.test(src));
 
   ok("a render timeout marks the card failed and continues", /harvest failed[\s\S]{0,600}continue;/.test(src));
   ok("consecutive failures eventually stop the run", /maxConsecutiveFailures/.test(src));
@@ -1671,10 +1673,11 @@ group("Diagnostics: the DOM dump reads, it does not click around");
   const clicks = [...src.matchAll(/(\w+)\.click\s*\(\)/g)].map((m) => m[1]);
   ok("the dump clicks exactly two things", clicks.length === 2, JSON.stringify(clicks));
   ok("and they are the card and the close control",
-    clicks.includes("card") && clicks.includes("closeBtn"), JSON.stringify(clicks));
+    clicks.includes("card") && clicks.some((c) => /el$/.test(c)), JSON.stringify(clicks));
   ok("it checks FORBIDDEN_CLICK before clicking the card",
     src.indexOf("forbidden(card, rules)") < src.indexOf("card.click()"));
-  ok("it filters forbidden elements out of the close candidates", /forbidden\(el, rules\)/.test(src));
+  ok("it filters forbidden elements out of the close candidates",
+    /isForbidden\(el, rules\)/.test(fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8")));
 
   // It must never click the control it is describing.
   ok("it never clicks an element it matched against ORIGINAL_POST_PATTERNS",
@@ -1693,7 +1696,7 @@ group("Diagnostics: the DOM dump reads, it does not click around");
   ok("it looks in JSON script tags", /application\/json/.test(src));
   ok("it looks at known app globals", /__APOLLO_STATE__|__INITIAL_STATE__|__NUXT__/.test(src));
   ok("it ignores jobright's own URLs when hunting for a destination", /jobright\\\.ai/.test(src) || /jobright\.ai/.test(src));
-  ok("it waits on wall-clock and allows for a hidden tab", /Date\.now\(\)/.test(src) && /document\.hidden/.test(src));
+  ok("it waits through the shared wall-clock helper", /D\(\)\.waitFor\(/.test(src));
 }
 
 // ---------------------------------------------------------------------------
@@ -1807,6 +1810,77 @@ group("Injection contract: nothing fails silently");
   ok("the dump logs a failed injection", /dump aborted: injection failed/.test(tri));
   ok("the dump logs the raw failure object", /console\.error\("\[JAF popup\] dump failed", report\)/.test(tri));
   ok("a failed dump still shows the raw response", /JSON\.stringify\(report, null, 2\)/.test(tri));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Detail view: detected by evidence text, not by a container selector");
+{
+  const det = fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8");
+
+  ok("the shared detection module exists and is one file", /JR\.detect = \{/.test(det));
+  ok("evidence is read off document.body", /evidenceIn\(rules, document\.body\)/.test(det));
+  ok("two evidence matches are required", /MIN_EVIDENCE = 2/.test(det));
+  ok("PANEL_SELECTORS is only a fast path", /Fast path, never fatal/.test(det));
+  ok("a selector miss does not end detection",
+    det.indexOf("// The real test: evidence text anywhere in the body.") > det.indexOf("for (const sel of rules.PANEL_SELECTORS"));
+  ok("the scope is the nearest common ancestor of the evidence", /nearestCommonAncestor\(anchors\)/.test(det));
+  ok("document.body is the fallback scope", /scope = document\.body/.test(det));
+  ok("no class name is guessed for the scope", !/querySelector\(["'`]\.[a-z]/i.test(det));
+
+  // Failure has to say how close it got.
+  for (const field of ["evidenceMatched", "evidenceMissed", "bodyTextLength", "bodyFirstLines", "url"]) {
+    ok(`a detection failure reports ${field}`, new RegExp(`\\b${field}\\b`).test(det));
+  }
+  ok("the failure says how many matched and how many were needed", /are required/.test(det));
+
+  // Both consumers use it; neither keeps its own copy.
+  for (const file of ["content/jobright-harvest.js", "content/jobright-dump.js"]) {
+    const src = fs.readFileSync(path.join(root, file), "utf8");
+    ok(`${file} uses the shared detection`, /D\(\)\.findDetailView/.test(src));
+    ok(`${file} has no private findPanel`, !/function findPanel/.test(src));
+    ok(`${file} has no private waitFor implementation`, !/async function waitFor/.test(src));
+  }
+}
+
+// ---------------------------------------------------------------------------
+group("Detail view: route versus overlay");
+{
+  const dump = fs.readFileSync(path.join(root, "content/jobright-dump.js"), "utf8");
+  const harvest = fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8");
+
+  ok("the dump records the URL before opening a card", /const urlBefore = location\.href/.test(dump));
+  ok("it reports whether the URL changed", /urlChanged/.test(dump));
+  ok("it names the navigation mode", /mode: urlAfter !== urlBefore/.test(dump));
+  ok("it says which close behaviour the mode needs", /closeShouldBe/.test(dump));
+  ok("it notes that surviving a route change proves client-side routing", /client-side routing/.test(dump));
+  ok("the dump goes back in history when the URL changed", /history\.back\(\)/.test(dump));
+
+  ok("the loop detects the navigation mode too", /navigationMode/.test(harvest));
+  ok("the loop goes back in history on a route", /history\.back\(\)/.test(harvest));
+  ok("the loop waits to return to the board", /return to the board/.test(harvest));
+  ok("the loop still clicks the X for an overlay", /findCloseAffordance/.test(harvest));
+  ok("the close path still goes through safeClick", /safeClick\(closeCand\.el/.test(harvest));
+  ok("history.back is not a click, so the guard is unaffected",
+    (harvest.match(/\.click\s*\(\)/g) || []).length === 1);
+
+  // Surviving a re-render is the part that breaks silently otherwise.
+  ok("cards are re-found by listing URL after a re-render", /resolveCard/.test(harvest));
+  ok("the re-find rescans the board to re-stamp", /JR\.scanBoard\(rules\)/.test(harvest));
+  ok("it matches on the listing URL, not the stamp", /c\.listingUrl === target\.listingUrl/.test(harvest));
+  ok("a card that cannot be re-found is reported, not skipped silently",
+    /could not be re-found by listing URL/.test(harvest));
+  ok("the navigation mode is reported on the run", /navigationMode: run\.navigationMode/.test(harvest));
+
+  // The detection module has to be in the page before either consumer runs.
+  const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
+  for (const consumer of ["jobright-dump.js", "jobright-harvest.js", "jobright-scan.js"]) {
+    const line = tri.split("\n").find((l) => l.includes(consumer) && l.includes("inject("));
+    ok(`${consumer} is injected together with the detection module`,
+      Boolean(line) && line.includes("jobright-detect.js"), line || "no inject line found");
+  }
+  ok("the harvest injection keeps the board scanner loaded for re-finding cards",
+    /jobright-scan\.js[^\]]*jobright-harvest\.js/.test(tri));
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);

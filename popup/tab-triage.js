@@ -47,7 +47,7 @@ export function isJobright(url) {
 
 export async function runTriage() {
   $("tri-status").textContent = "Scanning the board.";
-  await inject(["content/jobright-scan.js"]);
+  await inject(["content/jobright-detect.js", "content/jobright-scan.js"]);
   const scan = await call("scanBoard", toPlain());
 
   if (!scan || scan.__error) {
@@ -114,7 +114,7 @@ async function runDump() {
   $("tri-dump-note").textContent = "Opening the first card and reading its panel.";
   $("tri-dump-text").textContent = "";
 
-  const injected = await inject(["content/jobright-dump.js"]);
+  const injected = await inject(["content/jobright-detect.js", "content/jobright-dump.js"]);
   if (!injected.ok) {
     console.error("[JAF popup] dump aborted: injection failed", injected.error);
     $("tri-dump-note").textContent = `Could not inject content/jobright-dump.js: ${injected.error}`;
@@ -135,6 +135,16 @@ async function runDump() {
     return;
   }
 
+  if (report && report.error && report.detection) {
+    console.error("[JAF popup] detail view not detected", report.detection);
+    const d = report.detection;
+    $("tri-dump-note").textContent =
+      `${report.error} ${d.reason} Matched: ${d.evidenceMatched.join(", ") || "none"}. ` +
+      `Did not match: ${d.evidenceMissed.join(", ")}. Body text was ${d.bodyTextLength} characters.`;
+    $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
+    $("tri-dump-out").hidden = false;
+    return;
+  }
   if (!report || report.__error) {
     console.error("[JAF popup] dump failed", report);
     $("tri-dump-note").textContent = `Dump failed: ${report && report.__error ? report.__error : "no response"}`;
@@ -151,7 +161,9 @@ async function runDump() {
   const m = report.originalPostMatches || [];
   const anchors = (report.allPanelAnchors || []).length;
   const json = report.embeddedJson || {};
+  const nav = report.navigation;
   $("tri-dump-note").textContent =
+    (nav ? `Navigation: ${nav.mode}. Close should be ${nav.closeShouldBe}. ` : "") +
     (report.verdict ? report.verdict + " " : "") +
     `${m.length} element${m.length === 1 ? "" : "s"} matched ORIGINAL_POST_PATTERNS. ` +
     `${anchors} usable anchor${anchors === 1 ? "" : "s"} in the panel. ` +
@@ -205,7 +217,9 @@ async function startHarvest() {
   for (const r of rows) urlByCardId[r.card.cardId] = r.card.listingUrl;
 
   await setHarvestStop(false);
-  await inject(["content/jobright-harvest.js"]);
+  // jobright-scan.js stays loaded so the loop can re-find cards by listing
+  // URL after a route change rebuilds the board.
+  await inject(["content/jobright-detect.js", "content/jobright-scan.js", "content/jobright-harvest.js"]);
 
   $("tri-harvest-run").hidden = true;
   $("tri-harvest-stop").hidden = false;
@@ -245,6 +259,7 @@ async function pollProgress() {
   const bits = [`${p.done} harvested`, `${p.failed} failed`, `of ${p.total}`];
   if (p.current && running) bits.push(`on ${p.current}`);
   if (p.stoppedEarly) bits.push(`ended early: ${p.stopReason}`);
+  if (p.navigationMode) bits.push(`${p.navigationMode} navigation`);
   if (p.refusals && p.refusals.length) bits.push(`${p.refusals.length} click${p.refusals.length === 1 ? "" : "s"} refused by policy`);
   $("tri-harvest-status").textContent = bits.join(", ") + ".";
 
