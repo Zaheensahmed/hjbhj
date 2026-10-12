@@ -149,27 +149,59 @@
     const card = opts.cardId ? cards.find((c) => c.dataset.jafCard === opts.cardId) : cards[0];
     if (!card) return { error: "No scanned cards on the page. Run Scan this board first." };
 
-    const block = forbidden(card, rules);
-    if (block) { report.refusals.push({ what: "the card itself", matched: block }); return { ...report, error: "Refused to click the card." }; }
-
     const urlBefore = location.href;
-    const evidenceBefore = D().evidenceIn(rules, document.body).hits;
+    const evidenceBefore = D().evidenceIn(rules, document.body).hits.length;
 
-    card.click();
-    report.steps.push("clicked the card open");
+    // Try targets best-first. A bare click on a React card container often does
+    // nothing, so the container is the LAST thing tried, not the first.
+    const candidates = D().clickCandidates(card, rules);
+    report.clickCandidates = candidates.map((c) => ({ why: c.why, forbidden: c.forbidden, element: c.describe }));
 
-    // Does opening a card route to a new URL, or overlay the board?
-    const settle = await D().waitFor(() => {
-      const found = D().findDetailView(rules);
-      return (found.found && found.evidence.length > evidenceBefore.length) || location.href !== urlBefore;
-    }, rules, "detail view or navigation");
+    report.attempts = [];
+    let opened = false;
 
-    await sleep(600); // let a route finish painting before measuring
+    for (const cand of candidates) {
+      if (cand.forbidden) {
+        report.attempts.push({ why: cand.why, skipped: `refused by FORBIDDEN_CLICK: ${cand.forbidden}`, element: cand.describe });
+        report.refusals.push({ why: cand.why, matched: cand.forbidden });
+        continue;
+      }
+
+      const before = D().domSnapshot();
+      const act = D().activate(cand.el, rules, `open card via ${cand.why}`, report);
+
+      const settled = await D().waitFor(() => {
+        const found = D().findDetailView(rules);
+        return (found.found && found.evidence.length > evidenceBefore) || location.href !== urlBefore;
+      }, { HARVEST: { ...(rules.HARVEST || {}), renderTimeoutMs: 4000, minPolls: 3 } }, "detail view");
+
+      const delta = D().domDelta(before);
+      const nowFound = D().findDetailView(rules);
+
+      report.attempts.push({
+        why: cand.why,
+        element: cand.describe,
+        eventsDispatched: act.dispatched || null,
+        activateError: act.ok ? null : act.reason,
+        waitedMs: settled.ms,
+        evidenceAfter: nowFound.evidence,
+        domDelta: delta,
+        worked: nowFound.found && nowFound.evidence.length > evidenceBefore
+      });
+
+      if (nowFound.found && nowFound.evidence.length > evidenceBefore) {
+        opened = true;
+        report.openedVia = cand.why;
+        report.steps.push(`opened the card via ${cand.why} using ${(act.dispatched || []).join(", ")}`);
+        break;
+      }
+    }
+
+    await sleep(600); // let any route finish painting
 
     const urlAfter = location.href;
     report.navigation = {
-      urlBefore,
-      urlAfter,
+      urlBefore, urlAfter,
       urlChanged: urlAfter !== urlBefore,
       mode: urlAfter !== urlBefore ? "route (clicking a card changes the URL)" : "overlay (URL unchanged)",
       closeShouldBe: urlAfter !== urlBefore ? "history.back()" : "click the X",
@@ -178,6 +210,20 @@
         ? "This script is still running after the URL changed, so it is client-side routing and an injected loop survives it."
         : "The board stayed at the same URL, so the detail view is an overlay."
     };
+
+    if (!opened) {
+      const anyChange = report.attempts.some((a) => a.domDelta && a.domDelta.anythingChanged);
+      return {
+        ...report,
+        error: anyChange
+          ? "Every target was tried and the detail view never appeared, but the DOM did change. Something opened or re-rendered that the evidence patterns do not match."
+          : "Every target was tried and NOTHING in the DOM changed. The clicks are not reaching a handler at all.",
+        detection: D().findDetailView(rules).diagnostics,
+        hint: anyChange
+          ? "Compare evidenceAfter and domDelta per attempt below, and check PANEL_EVIDENCE against what actually rendered."
+          : "No body text, element count, overlay or URL change from any target. The card may need a real trusted click, or the handler may be on an element outside the scanned card."
+      };
+    }
 
     const detail = D().findDetailView(rules);
     if (!detail.found) {
@@ -267,8 +313,8 @@
       report.steps.push("went back in history, since opening a card changed the URL");
       await D().waitFor(() => location.href === urlBefore, rules, "return to the board");
     } else if (closeCand) {
-      closeCand.el.click();
-      report.steps.push("clicked the detail view's close control");
+      const act = D().activate(closeCand.el, rules, "close detail view", report);
+      report.steps.push(act.ok ? `closed via the X using ${act.dispatched.join(", ")}` : `close refused: ${act.reason}`);
     } else {
       document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       report.steps.push("no close control found; sent Escape");

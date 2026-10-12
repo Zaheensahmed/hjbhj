@@ -175,3 +175,61 @@ export function flash(btn, label = "Copied") {
   btn.disabled = true;
   setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 900);
 }
+
+// ------------------------------------------------------------------ busy state
+//
+// Every long action disables its button, shows a live line while it runs, and
+// leaves a result that persists. No action should ever look identical whether
+// it is running, finished or broken.
+
+const SPINNER = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
+
+export function busy(buttonId, statusId, runningLabel) {
+  const btn = $(buttonId);
+  const status = $(statusId);
+  const originalLabel = btn ? btn.textContent : "";
+  const started = Date.now();
+  let frame = 0;
+  let message = runningLabel || "Working";
+
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.busy = "1";
+    btn.textContent = runningLabel || originalLabel;
+  }
+
+  const paint = () => {
+    if (!status) return;
+    const secs = Math.round((Date.now() - started) / 1000);
+    status.className = "note busy-line";
+    status.textContent = `${SPINNER[frame % SPINNER.length]} ${message}${secs >= 2 ? `  (${secs}s)` : ""}`;
+    frame++;
+  };
+  paint();
+  const timer = setInterval(paint, 120);
+
+  const restoreButton = () => {
+    clearInterval(timer);
+    if (!btn) return;
+    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.textContent = originalLabel;
+  };
+
+  return {
+    /** Change the running message, e.g. once a count is known. */
+    update(text) { message = text; paint(); },
+    /** Finished, with a result that stays on screen. */
+    done(text) {
+      restoreButton();
+      if (status) { status.className = "note done-line"; status.textContent = text; }
+    },
+    /** Finished, but something else owns the status line from here. */
+    restore() { restoreButton(); },
+    /** Failed, with the reason in the same place the progress was. */
+    fail(text) {
+      restoreButton();
+      if (status) { status.className = "note fail-line"; status.textContent = text; }
+    }
+  };
+}

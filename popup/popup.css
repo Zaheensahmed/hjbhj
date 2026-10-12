@@ -155,3 +155,9 @@ button.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent
 .held-wrap .card { opacity: .9; }
 .held-head { font-size: 12px; font-weight: 700; color: var(--amber); text-transform: uppercase; letter-spacing: .04em; }
 .not-queue { font-size: 11px; color: var(--amber); margin: 2px 0 8px; }
+
+/* ---------------------------------------------------------- busy feedback */
+button[data-busy] { opacity: .75; cursor: progress; }
+.busy-line { color: var(--blue); font-variant-numeric: tabular-nums; }
+.done-line { color: var(--fg); }
+.fail-line { color: var(--red); font-weight: 600; }

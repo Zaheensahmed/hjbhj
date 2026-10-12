@@ -161,7 +161,133 @@
     }
   }
 
+  // --------------------------------------------------------------- activation
+
+  function describeElement(el) {
+    if (!el) return null;
+    return {
+      tagName: el.tagName,
+      id: el.id || null,
+      className: typeof el.className === "string" ? el.className.slice(0, 200) : null,
+      role: el.getAttribute ? el.getAttribute("role") : null,
+      href: el.getAttribute ? el.getAttribute("href") : null,
+      text: text(el).slice(0, 80),
+      rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+      outerHTML: (el.outerHTML || "").slice(0, 300)
+    };
+  }
+
+  const clickable = (el) => {
+    if (!el || !el.getClientRects || !el.getClientRects().length) return false;
+    if (/^(A|BUTTON)$/.test(el.tagName)) return true;
+    if (el.getAttribute && el.getAttribute("role") === "button") return true;
+    if (typeof el.onclick === "function") return true;
+    try { return getComputedStyle(el).cursor === "pointer"; } catch { return false; }
+  };
+
+  /**
+   * Targets to try, best first. A bare click on the card container is last,
+   * because a React card usually binds its handler to an inner control.
+   */
+  function clickCandidates(cardEl, rules) {
+    const out = [];
+    const push = (el, why) => {
+      if (!el || out.some((c) => c.el === el)) return;
+      const blocked = isForbidden(el, rules);
+      out.push({ el, why, forbidden: blocked, describe: describeElement(el) });
+    };
+
+    push(cardEl.querySelector("h1 a, h2 a, h3 a, h4 a, [class*='title'] a, a[class*='title']"), "title anchor");
+    push(cardEl.querySelector("h1, h2, h3, h4, [class*='title'], [class*='Title']"), "title heading");
+
+    for (const p of rules.LISTING_HREF_PATTERNS || []) {
+      const re = rx(p);
+      const hit = [...cardEl.querySelectorAll("a[href]")].find((a) => re.test(a.getAttribute("href") || "") || re.test(a.href || ""));
+      if (hit) { push(hit, "anchor matching LISTING_HREF_PATTERNS"); break; }
+    }
+
+    const biggest = [...cardEl.querySelectorAll("*")]
+      .filter((el) => el !== cardEl && clickable(el))
+      .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
+      .sort((a, b) => b.area - a.area)[0];
+    if (biggest) push(biggest.el, "largest clickable descendant");
+
+    push(cardEl, "the card container itself");
+    return out;
+  }
+
+  /**
+   * A real pointer sequence. React frequently ignores a bare element.click()
+   * on a container, because its handler is bound to pointer or mouse events.
+   *
+   * This is the ONLY way anything in the extension activates a page element,
+   * and it refuses FORBIDDEN_CLICK before dispatching anything.
+   */
+  function activate(el, rules, why, recorder) {
+    if (!el) return { ok: false, reason: "no element" };
+    const blocked = isForbidden(el, rules);
+    if (blocked) {
+      if (recorder) recorder.refusals.push({ why, label: clickLabel(el).slice(0, 160), matched: blocked, at: new Date().toISOString() });
+      return { ok: false, reason: `refused: matches ${blocked}`, forbidden: blocked };
+    }
+
+    const r = el.getBoundingClientRect();
+    const opts = { bubbles: true, cancelable: true, composed: true,
+                   clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + r.height / 2) };
+    try { el.scrollIntoView({ block: "center" }); } catch { /* not scrollable */ }
+
+    const dispatched = [];
+    for (const [type, Ctor] of [["pointerdown", globalThis.PointerEvent || MouseEvent],
+                                ["mousedown", MouseEvent], ["pointerup", globalThis.PointerEvent || MouseEvent],
+                                ["mouseup", MouseEvent], ["click", MouseEvent]]) {
+      try {
+        el.dispatchEvent(new Ctor(type, type.startsWith("pointer") ? { ...opts, pointerId: 1, isPrimary: true, pointerType: "mouse" } : opts));
+        dispatched.push(type);
+      } catch (err) {
+        dispatched.push(`${type} FAILED: ${err.message}`);
+      }
+    }
+    if (recorder) recorder.clicks.push({ why, label: clickLabel(el).slice(0, 80), dispatched });
+    return { ok: true, dispatched, describe: describeElement(el) };
+  }
+
+  // ------------------------------------------------------------- dom deltas
+
+  function domSnapshot() {
+    const overlays = [...document.querySelectorAll("body *")].filter((el) => {
+      try {
+        const s = getComputedStyle(el);
+        if (!el.getClientRects().length) return false;
+        return (s.position === "fixed" || s.position === "absolute") && Number(s.zIndex) >= 100;
+      } catch { return false; }
+    });
+    return {
+      bodyTextLength: text(document.body).length,
+      elementCount: document.body.querySelectorAll("*").length,
+      highLayerCount: overlays.length,
+      highLayerSignature: overlays.slice(0, 8).map((el) => `${el.tagName}.${String(el.className).slice(0, 30)}`),
+      url: location.href
+    };
+  }
+
+  function domDelta(before) {
+    const after = domSnapshot();
+    return {
+      before, after,
+      bodyTextChanged: after.bodyTextLength - before.bodyTextLength,
+      elementsChanged: after.elementCount - before.elementCount,
+      newHighLayers: after.highLayerCount - before.highLayerCount,
+      urlChanged: after.url !== before.url,
+      anythingChanged: after.bodyTextLength !== before.bodyTextLength ||
+                       after.elementCount !== before.elementCount ||
+                       after.highLayerCount !== before.highLayerCount ||
+                       after.url !== before.url
+    };
+  }
+
   JR.detect = {
+    describeElement, clickCandidates, activate, clickable,
+    domSnapshot, domDelta,
     text, rx, sleep, clickLabel, isForbidden,
     evidenceIn, deepestMatch, nearestCommonAncestor,
     findDetailView, findCloseAffordance, waitFor,

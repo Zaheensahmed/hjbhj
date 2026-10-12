@@ -8,7 +8,7 @@ import { getTriage, dismissCard, restoreCard, setShortlisted, setHarvestStop, ge
 import { toPlain, HARVEST, ORIGINAL_POST_PATTERNS } from "../rules/jobright-rules.js";
 import { triageAll } from "../engine/triage.js";
 import { boardReport } from "../engine/assess.js";
-import { $, esc, show, wireCopyText, flash } from "./ui.js";
+import { $, esc, show, wireCopyText, flash, busy } from "./ui.js";
 import { makeInjector } from "./inject.js";
 
 const { inject, call } = makeInjector(() => state.tabId, "JAF_JR");
@@ -46,14 +46,21 @@ export function isJobright(url) {
 }
 
 export async function runTriage() {
-  $("tri-status").textContent = "Scanning the board.";
-  await inject(["content/jobright-detect.js", "content/jobright-scan.js"]);
+  const b = busy("tri-scan", "tri-status", "Scanning the board");
+
+  const injected = await inject(["content/jobright-detect.js", "content/jobright-scan.js"]);
+  if (!injected.ok) {
+    b.fail(`Could not inject the board scanner: ${injected.error}`);
+    return;
+  }
+  b.update("Reading cards");
   const scan = await call("scanBoard", toPlain());
 
   if (!scan || scan.__error) {
-    $("tri-status").textContent = `Could not read the board. ${scan && scan.__error ? scan.__error : ""}`;
+    b.fail(`Could not read the board. ${scan && scan.__error ? scan.__error : "no response"}`);
     return;
   }
+  b.update(`${scan.cardCount} card${scan.cardCount === 1 ? "" : "s"} found, triaging`);
   state.scan = scan;
   state.store = await getTriage();
   state.prefs = await getPrefs();
@@ -61,6 +68,7 @@ export async function runTriage() {
   state.result = triageAll(scan.cards, state.store);
   show("tri-harvest", scan.cards.length > 0);
   await syncAutoQueue();
+  b.restore();   // render() owns the status line from here
   render();
 }
 
@@ -111,15 +119,16 @@ async function runDump() {
     return;
   }
   $("tri-dump-out").hidden = false;
-  $("tri-dump-note").textContent = "Opening the first card and reading its panel.";
   $("tri-dump-text").textContent = "";
+  const b = busy("tri-dump", "tri-dump-note", "Opening the first card");
 
   const injected = await inject(["content/jobright-detect.js", "content/jobright-dump.js"]);
   if (!injected.ok) {
     console.error("[JAF popup] dump aborted: injection failed", injected.error);
-    $("tri-dump-note").textContent = `Could not inject content/jobright-dump.js: ${injected.error}`;
+    b.fail(`Could not inject content/jobright-dump.js: ${injected.error}`);
     return;
   }
+  b.update("Trying each click target and reading the page");
 
   const first = state.result.rows[0].card.cardId;
   const rules = toPlain();
@@ -130,7 +139,7 @@ async function runDump() {
     report = await call("dumpPanel", { rules, cardId: first });
   } catch (err) {
     console.error("[JAF popup] dump threw", err);
-    $("tri-dump-note").textContent = `Dump threw: ${err && err.message ? err.message : err}`;
+    b.fail(`Dump threw: ${err && err.message ? err.message : err}`);
     $("tri-dump-text").textContent = String(err && err.stack ? err.stack : err);
     return;
   }
@@ -138,16 +147,15 @@ async function runDump() {
   if (report && report.error && report.detection) {
     console.error("[JAF popup] detail view not detected", report.detection);
     const d = report.detection;
-    $("tri-dump-note").textContent =
-      `${report.error} ${d.reason} Matched: ${d.evidenceMatched.join(", ") || "none"}. ` +
-      `Did not match: ${d.evidenceMissed.join(", ")}. Body text was ${d.bodyTextLength} characters.`;
+    b.fail(`${report.error} ${d.reason} Matched: ${d.evidenceMatched.join(", ") || "none"}. ` +
+      `Did not match: ${d.evidenceMissed.join(", ")}. Body text was ${d.bodyTextLength} characters.`);
     $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
     $("tri-dump-out").hidden = false;
     return;
   }
   if (!report || report.__error) {
     console.error("[JAF popup] dump failed", report);
-    $("tri-dump-note").textContent = `Dump failed: ${report && report.__error ? report.__error : "no response"}`;
+    b.fail(`Dump failed: ${report && report.__error ? report.__error : "no response"}`);
     $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
     $("tri-dump-out").hidden = false;
     return;
@@ -162,13 +170,14 @@ async function runDump() {
   const anchors = (report.allPanelAnchors || []).length;
   const json = report.embeddedJson || {};
   const nav = report.navigation;
-  $("tri-dump-note").textContent =
+  b.done(
     (nav ? `Navigation: ${nav.mode}. Close should be ${nav.closeShouldBe}. ` : "") +
     (report.verdict ? report.verdict + " " : "") +
     `${m.length} element${m.length === 1 ? "" : "s"} matched ORIGINAL_POST_PATTERNS. ` +
     `${anchors} usable anchor${anchors === 1 ? "" : "s"} in the panel. ` +
     `${(json.candidates || []).length} off-site URL${(json.candidates || []).length === 1 ? "" : "s"} in embedded JSON. ` +
-    `Patterns in use: ${ORIGINAL_POST_PATTERNS.map((r) => r.source).join("  ")}`;
+    `Opened via: ${report.openedVia || "unknown"}. ` +
+    `Patterns in use: ${ORIGINAL_POST_PATTERNS.map((r) => r.source).join("  ")}`);
 
   $("tri-dump-text").textContent = JSON.stringify(report, null, 2);
 }
@@ -184,17 +193,17 @@ async function resetThisBoard() {
   btn.dataset.armed = "0";
   btn.textContent = "Reset board state";
 
+  const b = busy("tri-reset", "tri-status", "Clearing stored state for this board");
   const listingUrls = state.scan ? state.scan.cards.map((c) => c.listingUrl).filter(Boolean) : [];
   const removed = await resetBoard({ boardUrl: state.scan ? state.scan.url : null, listingUrls });
 
   state.store = await getTriage();
   state.result = state.scan ? triageAll(state.scan.cards, state.store) : null;
   state.report = null;
-  $("tri-status").textContent =
+  b.done(
     `Cleared for this board: ${removed.harvested} harvested record${removed.harvested === 1 ? "" : "s"}, ` +
     `${removed.shortlist} shortlist entr${removed.shortlist === 1 ? "y" : "ies"}, ${removed.dismissed} dismissal${removed.dismissed === 1 ? "" : "s"}, ` +
-    `plus the run record and harvest flags. Scan again to start clean.`;
-  if (state.result) render();
+    `plus the run record and harvest flags. Scan again to start clean.`);
 }
 
 // -------------------------------------------------------------- stage 2
@@ -216,11 +225,17 @@ async function startHarvest() {
   const urlByCardId = {};
   for (const r of rows) urlByCardId[r.card.cardId] = r.card.listingUrl;
 
+  const b = busy("tri-harvest-run", "tri-harvest-status", "Starting the harvest loop");
   await setHarvestStop(false);
   // jobright-scan.js stays loaded so the loop can re-find cards by listing
   // URL after a route change rebuilds the board.
-  await inject(["content/jobright-detect.js", "content/jobright-scan.js", "content/jobright-harvest.js"]);
+  const injected = await inject(["content/jobright-detect.js", "content/jobright-scan.js", "content/jobright-harvest.js"]);
+  if (!injected.ok) {
+    b.fail(`Could not inject the harvest loop: ${injected.error}`);
+    return;
+  }
 
+  b.restore();   // pollProgress owns the line from here
   $("tri-harvest-run").hidden = true;
   $("tri-harvest-stop").hidden = false;
   $("tri-harvest-status").textContent =

@@ -1107,20 +1107,33 @@ group("Feature 4: the harvest loop's click policy");
     src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
   const src = stripComments(fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8"));
 
-  // Every click must go through safeClick. Exactly one bare .click() is
-  // allowed: the one inside safeClick itself, after the refusal check.
-  const bareClicks = [...src.matchAll(/\.click\s*\(/g)].length;
-  ok("there is exactly one .click() in the file, inside safeClick", bareClicks === 1, String(bareClicks));
-  // Order matters more than proximity: the refusal check has to come first.
-  const scBody = (() => {
-    const from = src.indexOf("function safeClick");
-    return from === -1 ? "" : src.slice(from, src.indexOf("\n  }", from));
+  // The policy is now stronger than "one .click()". Nothing in any content
+  // script calls element.click() at all: a bare click is ignored by React on a
+  // container, so every activation goes through D().activate(), which dispatches
+  // a real pointer sequence and refuses FORBIDDEN_CLICK before dispatching
+  // anything.
+  const stripAll = (f) => stripComments(fs.readFileSync(path.join(root, f), "utf8"));
+  for (const file of ["content/jobright-harvest.js", "content/jobright-dump.js", "content/jobright-detect.js",
+                      "content/jobright-scan.js", "content/fill.js", "content/scan.js", "content/label.js"]) {
+    ok(`${file} calls element.click() nowhere`, !/\.click\s*\(\s*\)/.test(stripAll(file)), file);
+  }
+
+  const det = stripAll("content/jobright-detect.js");
+  const actBody = (() => {
+    const from = det.indexOf("function activate(");
+    return from === -1 ? "" : det.slice(from, det.indexOf("\n  }", from));
   })();
-  ok("safeClick's body exists", scBody.length > 0);
-  ok("safeClick checks the forbidden list BEFORE it clicks",
-    scBody.includes("isForbidden(") && scBody.indexOf("isForbidden(") < scBody.indexOf(".click("));
-  ok("the one .click() in the file is the one inside safeClick", scBody.includes(".click("));
-  ok("safeClick records a refusal rather than clicking", /run\.refusals\.push/.test(src));
+  ok("activate() exists and is the single activation path", actBody.length > 0);
+  ok("activate() checks the forbidden list BEFORE dispatching anything",
+    actBody.includes("isForbidden(") && actBody.indexOf("isForbidden(") < actBody.indexOf("dispatchEvent"));
+  ok("activate() records a refusal instead of dispatching", /recorder\.refusals\.push/.test(actBody));
+  ok("activate() returns without dispatching when refused",
+    /return \{ ok: false, reason: `refused/.test(actBody));
+  ok("activate() dispatches the full pointer sequence",
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].every((t) => actBody.includes(`"${t}"`)));
+  ok("every dispatched event bubbles", /bubbles: true/.test(actBody));
+  ok("the harvest loop activates only through safeClick, which delegates to activate",
+    /return D\(\)\.activate\(el, rules, why, run\)/.test(src));
 
   // The only deliberate click targets.
   const whys = [...src.matchAll(/safeClick\([^,]+,\s*[`"']([^`"'$]*)/g)].map((m) => m[1].trim());
@@ -1669,13 +1682,14 @@ group("Diagnostics: the DOM dump reads, it does not click around");
     src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
   const src = stripComments(fs.readFileSync(path.join(root, "content/jobright-dump.js"), "utf8"));
 
-  // Exactly two clicks: the card, and the panel's close control.
-  const clicks = [...src.matchAll(/(\w+)\.click\s*\(\)/g)].map((m) => m[1]);
-  ok("the dump clicks exactly two things", clicks.length === 2, JSON.stringify(clicks));
-  ok("and they are the card and the close control",
-    clicks.includes("card") && clicks.some((c) => /el$/.test(c)), JSON.stringify(clicks));
-  ok("it checks FORBIDDEN_CLICK before clicking the card",
-    src.indexOf("forbidden(card, rules)") < src.indexOf("card.click()"));
+  // The dump activates exactly two kinds of thing: a card, and the close
+  // control. Every one goes through the guarded dispatcher.
+  const acts = [...src.matchAll(/D\(\)\.activate\([^,]+,\s*rules,\s*[`"']([^`"'$]*)/g)].map((m) => m[1].trim());
+  ok("the dump activates only cards and the close control",
+    acts.length > 0 && acts.every((a) => /^open card via|^close detail view/.test(a)), JSON.stringify(acts));
+  ok("it calls element.click() nowhere", !/\.click\s*\(\s*\)/.test(src));
+  ok("forbidden candidates are skipped before any dispatch", /if \(cand\.forbidden\)/.test(src));
+  ok("a skipped candidate is recorded as a refusal", /refused by FORBIDDEN_CLICK/.test(src));
   ok("it filters forbidden elements out of the close candidates",
     /isForbidden\(el, rules\)/.test(fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8")));
 
@@ -1881,6 +1895,89 @@ group("Detail view: route versus overlay");
   }
   ok("the harvest injection keeps the board scanner loaded for re-finding cards",
     /jobright-scan\.js[^\]]*jobright-harvest\.js/.test(tri));
+}
+
+
+// ---------------------------------------------------------------------------
+group("Clicking a card: better targets, a real pointer sequence, and proof");
+{
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+  const det = stripComments(fs.readFileSync(path.join(root, "content/jobright-detect.js"), "utf8"));
+  const dump = stripComments(fs.readFileSync(path.join(root, "content/jobright-dump.js"), "utf8"));
+  const harvest = stripComments(fs.readFileSync(path.join(root, "content/jobright-harvest.js"), "utf8"));
+
+  // Targets, in the order asked for.
+  const cand = det.slice(det.indexOf("function clickCandidates"), det.indexOf("function activate("));
+  ok("the title anchor is tried first", cand.indexOf('"title anchor"') > -1);
+  ok("then the title heading", cand.indexOf('"title heading"') > cand.indexOf('"title anchor"'));
+  ok("then an anchor matching LISTING_HREF_PATTERNS",
+    cand.indexOf("LISTING_HREF_PATTERNS") > cand.indexOf('"title heading"'));
+  ok("then the largest clickable descendant",
+    cand.indexOf('"largest clickable descendant"') > cand.indexOf("LISTING_HREF_PATTERNS"));
+  ok("the card container is tried LAST, not first",
+    cand.indexOf('"the card container itself"') > cand.indexOf('"largest clickable descendant"'));
+  ok("largest is measured by area", /r\.width \* r\.height/.test(cand));
+  ok("every candidate is checked against FORBIDDEN_CLICK", /forbidden: blocked/.test(cand));
+
+  // The pointer sequence.
+  ok("activation dispatches pointerdown, mousedown, pointerup, mouseup and click",
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].every((t) => det.includes(`"${t}"`)));
+  ok("events carry coordinates from the element's own box", /clientX: Math\.round/.test(det));
+  ok("the dispatched list is reported back", /dispatched\.push\(type\)/.test(det));
+  ok("a dispatch failure is recorded rather than thrown away", /FAILED: \$\{err\.message\}/.test(det));
+
+  // What it clicked, reported.
+  ok("describeElement reports tagName, id, className, text and outerHTML",
+    ["tagName", "id:", "className", "text:", "outerHTML"].every((f) => det.includes(f)));
+  ok("outerHTML is truncated", /outerHTML \|\| ""\)\.slice\(0, 300\)/.test(det));
+  ok("the dump reports every candidate it considered", /report\.clickCandidates/.test(dump));
+  ok("the dump reports each attempt separately", /report\.attempts\.push/.test(dump));
+  ok("each attempt names the element and the events dispatched",
+    /element: cand\.describe/.test(dump) && /eventsDispatched/.test(dump));
+  ok("the dump says which target actually worked", /report\.openedVia/.test(dump));
+  ok("the loop records which target worked too", /run\.openedVia/.test(harvest));
+
+  // DOM delta when nothing opens.
+  ok("a snapshot is taken before clicking", /domSnapshot\(\)/.test(det) && /D\(\)\.domSnapshot\(\)/.test(dump));
+  ok("the delta reports body text length change", /bodyTextChanged/.test(det));
+  ok("the delta reports new high-layer elements", /newHighLayers/.test(det));
+  ok("high layers mean fixed or absolute with a real z-index", /position === "fixed"/.test(det) && /zIndex/.test(det));
+  ok("the delta says whether anything changed at all", /anythingChanged/.test(det));
+  ok("the dump distinguishes 'something changed' from 'nothing changed'",
+    /NOTHING in the DOM changed/.test(dump) && /the DOM did change/.test(dump));
+  ok("the loop makes the same distinction", /Nothing in the DOM changed at all/.test(harvest));
+  ok("the no-change case points at the real cause", /not reaching a handler/.test(dump));
+}
+
+// ---------------------------------------------------------------------------
+group("Popup feedback: no long action is silent");
+{
+  const ui = fs.readFileSync(path.join(root, "popup/ui.js"), "utf8");
+  ok("there is a shared busy helper", /export function busy\(/.test(ui));
+  ok("it disables the button while running", /btn\.disabled = true/.test(ui));
+  ok("it marks the button busy for styling", /dataset\.busy = "1"/.test(ui));
+  ok("it animates a spinner", /SPINNER\[frame % SPINNER\.length\]/.test(ui));
+  ok("it shows elapsed seconds once an action is slow", /\(\$\{secs\}s\)/.test(ui));
+  ok("it can update the message mid-run", /update\(text\)/.test(ui));
+  ok("it has a finished state that persists", /done\(text\)/.test(ui) && /done-line/.test(ui));
+  ok("it has a failure state in the same place", /fail\(text\)/.test(ui) && /fail-line/.test(ui));
+  ok("it always re-enables the button", (ui.match(/restoreButton\(\)/g) || []).length >= 3);
+
+  const tri = fs.readFileSync(path.join(root, "popup/tab-triage.js"), "utf8");
+  for (const [action, btn] of [["scan", "tri-scan"], ["harvest", "tri-harvest-run"],
+                               ["dump", "tri-dump"], ["reset", "tri-reset"]]) {
+    ok(`${action} shows a busy state`, new RegExp(`busy\\("${btn}"`).test(tri), btn);
+  }
+  ok("scan reports a live card count while triaging", /card\$\{scan\.cardCount === 1 \? "" : "s"\} found, triaging/.test(tri));
+  ok("scan reports an injection failure in the same place", /Could not inject the board scanner/.test(tri));
+  ok("scan reports a read failure rather than going quiet", /Could not read the board/.test(tri));
+  ok("the dump reports its failures through the busy line", /b\.fail\(/.test(tri));
+  ok("the dump's success line persists", /b\.done\(/.test(tri));
+
+  const css = fs.readFileSync(path.join(root, "popup/popup.css"), "utf8");
+  ok("a busy button is visibly busy", /button\[data-busy\]/.test(css) && /cursor: progress/.test(css));
+  ok("a failed line is visually distinct", /\.fail-line/.test(css));
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}`);

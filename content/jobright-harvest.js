@@ -33,19 +33,14 @@
   const isForbidden = (el, rules) => D().isForbidden(el, rules);
 
   /**
-   * The only way anything in this file clicks. Refuses on FORBIDDEN_CLICK and
-   * records the refusal so a run reports what it declined to touch.
+   * The only way anything in this file activates a page element.
+   *
+   * A bare element.click() is not used anywhere: React commonly ignores it on a
+   * container. D().activate() dispatches a real pointer sequence, and refuses
+   * FORBIDDEN_CLICK before dispatching anything, recording the refusal.
    */
   function safeClick(el, why, rules) {
-    if (!el) return { ok: false, reason: "no element" };
-    const forbidden = isForbidden(el, rules);
-    if (forbidden) {
-      run.refusals.push({ why, label: clickLabel(el).slice(0, 160), matched: forbidden, at: new Date().toISOString() });
-      return { ok: false, reason: `refused: matches ${forbidden}` };
-    }
-    el.click();
-    run.clicks.push({ why, label: clickLabel(el).slice(0, 80) });
-    return { ok: true };
+    return D().activate(el, rules, why, run);
   }
 
   const waitFor = (pred, rules, label) => D().waitFor(pred, rules, label);
@@ -176,19 +171,24 @@
 
       const urlBefore = location.href;
       const evidenceBefore = D().evidenceIn(rules, document.body).hits.length;
-      const opened = safeClick(cardEl, `open card ${target.cardId}`, rules);
+      // Best-first targets. The card container is tried last, because a React
+      // card usually binds its handler to an inner control.
+      const candidates = D().clickCandidates(cardEl, rules).filter((c) => !c.forbidden);
+      const domBefore = D().domSnapshot();
+      let opened = { ok: false, reason: "no permitted target on this card" };
+      let waited = { ok: false, polls: 0, ms: 0 };
+      let openedVia = null;
 
-      if (!opened.ok) {
-        run.failed++; consecutiveFailures++;
-        run.results.push({ ...target, status: "harvest failed", why: `could not open: ${opened.reason}` });
-        await report("harvest:record", { ...target, status: "failed", why: opened.reason });
-        continue;
+      for (const cand of candidates) {
+        opened = safeClick(cand.el, `open card ${target.cardId} via ${cand.why}`, rules);
+        if (!opened.ok) continue;
+        waited = await waitFor(() => {
+          const found = D().findDetailView(rules);
+          return (found.found && found.evidence.length > evidenceBefore) || location.href !== urlBefore;
+        }, { ...rules, HARVEST: { ...rules.HARVEST, renderTimeoutMs: 4000, minPolls: 3 } }, "detail view");
+        if (waited.ok) { openedVia = cand.why; break; }
       }
-
-      const waited = await waitFor(() => {
-        const found = D().findDetailView(rules);
-        return (found.found && found.evidence.length > evidenceBefore) || location.href !== urlBefore;
-      }, rules, "detail view");
+      if (openedVia) run.openedVia = openedVia;
 
       await sleep(500); // let a route finish painting
 
@@ -198,10 +198,16 @@
       const detail = D().findDetailView(rules);
       if (!waited.ok || !detail.found) {
         run.failed++; consecutiveFailures++;
+        const delta = D().domDelta(domBefore);
         const why = waited.stopped
           ? "stopped while waiting"
-          : `the detail view did not appear (${waited.polls} polls over ${Math.round(waited.ms / 1000)}s${waited.throttled ? ", tab hidden so the budget was extended" : ""}). Evidence matched: ${detail.evidence.join(", ") || "none"}`;
-        run.results.push({ ...target, status: "harvest failed", why, detection: detail.diagnostics || null });
+          : `the detail view did not appear after trying ${candidates.length} target${candidates.length === 1 ? "" : "s"}. ` +
+            `Evidence matched: ${detail.evidence.join(", ") || "none"}. ` +
+            (delta.anythingChanged
+              ? `The DOM did change (body text ${delta.bodyTextChanged >= 0 ? "+" : ""}${delta.bodyTextChanged} chars, ${delta.newHighLayers} new overlay layers), so something rendered that PANEL_EVIDENCE does not match.`
+              : "Nothing in the DOM changed at all, so the clicks are not reaching a handler.");
+        run.results.push({ ...target, status: "harvest failed", why, detection: detail.diagnostics || null, domDelta: delta,
+                           targetsTried: candidates.map((c) => c.why) });
         await report("harvest:record", { ...target, status: "failed", why });
         await leaveDetailView(routed, urlBefore, detail.scope, rules);
         await writeProgress();
